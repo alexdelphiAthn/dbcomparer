@@ -48,6 +48,7 @@ type
     NoDelete: Boolean;
     WithTriggers: Boolean;
     WithData: Boolean;
+    WithDataDiff: Boolean;
   end;
 
   TDBComparer = class
@@ -78,6 +79,14 @@ type
     procedure CompareViews(const DB1, DB2: string);
     procedure CompareProcedures(const DB1, DB2: string);
     procedure CopyData(const DB1, DB2, TableName: string);
+    procedure CompareAndSyncData(const DB1, DB2, TableName: string);
+    function GetPrimaryKeyColumns(Conn: TUniConnection;
+                                   const DBName, TableName: string): TStringList;
+    function BuildWhereClause(const PKColumns: TStringList;
+                              Query: TUniQuery): string;
+    function BuildUpdateStatement(const TableName: string;
+                                   const PKColumns: TStringList;
+                                   Query: TUniQuery): string;
     function ColumnsAreEqual(const Col1, Col2: TColumnInfo): Boolean;
     function IndexesAreEqual(const Idx1, Idx2: TIndexInfo): Boolean;
     function TriggersAreEqual(const Trg1, Trg2: TTriggerInfo): Boolean;
@@ -180,6 +189,7 @@ begin
   Query := TUniQuery.Create(nil);
   try
     Query.Connection := Conn;
+    // CORRECCIÓN: Concatenación adecuada de cadenas
     Query.SQL.Text := 'SELECT COLUMN_NAME, ' +
                       '       COLUMN_TYPE, ' +
                       '       IS_NULLABLE, ' +
@@ -204,15 +214,18 @@ begin
         Col.ColumnDefault := Query.FieldByName('COLUMN_DEFAULT').AsString
       else
         Col.ColumnDefault := '';
+
       if not Query.FieldByName('CHARACTER_MAXIMUM_LENGTH').IsNull then
         Col.CharMaxLength :=
                           Query.FieldByName('CHARACTER_MAXIMUM_LENGTH').AsString
       else
         Col.CharMaxLength := '';
+
       if not Query.FieldByName('COLUMN_COMMENT').IsNull then
         Col.ColumnComment := Query.FieldByName('COLUMN_COMMENT').AsString
       else
         Col.ColumnComment := '';
+
       Result.Columns.Add(Col);
       Query.Next;
     end;
@@ -223,8 +236,7 @@ end;
 
 function TDBComparer.GetTableIndexes(Conn: TUniConnection;
                                      const DBName,
-                                           TableName: string):
-                                                             TArray<TIndexInfo>;
+                                           TableName: string): TArray<TIndexInfo>;
 var
   Query: TUniQuery;
   IndexList: TList<TIndexInfo>;
@@ -239,6 +251,7 @@ begin
     Query := TUniQuery.Create(nil);
     try
       Query.Connection := Conn;
+      // CORRECCIÓN: Concatenación adecuada
       Query.SQL.Text := 'SELECT INDEX_NAME, ' +
                         '       NON_UNIQUE, ' +
                         '       COLUMN_NAME, ' +
@@ -248,6 +261,7 @@ begin
                         '   AND TABLE_NAME = ' + QuotedStr(TableName) + ' ' +
                         'ORDER BY INDEX_NAME, SEQ_IN_INDEX';
       Query.Open;
+      // ... (El resto del código dentro de este procedimiento está bien)
       LastIndexName := '';
       while not Query.Eof do
       begin
@@ -297,6 +311,7 @@ begin
     Query := TUniQuery.Create(nil);
     try
       Query.Connection := Conn;
+      // CORRECCIÓN: Concatenación y espacios
       Query.SQL.Text :=
         'SELECT TRIGGER_NAME, ' +
         '       EVENT_MANIPULATION, ' +
@@ -307,6 +322,7 @@ begin
         ' WHERE TRIGGER_SCHEMA = ' + QuotedStr(DBName) + ' ' +
         'ORDER BY EVENT_OBJECT_TABLE, TRIGGER_NAME';
       Query.Open;
+
       while not Query.Eof do
       begin
         Trigger.TriggerName := Query.FieldByName('TRIGGER_NAME').AsString;
@@ -506,10 +522,12 @@ begin
   Extra2 := NormalizeExtra(Col2.Extra);
   Def1 := Trim(Col1.ColumnDefault);
   Def2 := Trim(Col2.ColumnDefault);
+
   Result := (Typ1 = Typ2) and
             (Null1 = Null2) and
             (Key1 = Key2) and
             (Extra1 = Extra2);
+
   if Result then
   begin
     IsAutoInc := (Pos('auto_increment', Extra1) > 0)
@@ -522,6 +540,7 @@ begin
         Result := False;
     end;
   end;
+
   if Result then
     Result := SameText(Col1.ColumnComment, Col2.ColumnComment);
 end;
@@ -614,8 +633,8 @@ var
 begin
   Indexes1 := GetTableIndexes(Conn1, DB1, TableName);
   Indexes2 := GetTableIndexes(Conn2, DB2, TableName);
-  // Índices que existen en DB2 pero no en DB1
-  //(eliminar solo si NO está --nodelete)
+
+  // Índices que existen en DB2 pero no en DB1 (eliminar solo si NO está --nodelete)
   if not FOptions.NoDelete then
   begin
     for i := 0 to High(Indexes2) do
@@ -634,13 +653,14 @@ begin
       if not Found then
       begin
         FScript.Add('-- Eliminar índice: ' + TableName + '.'
-                                                       + Indexes2[i].IndexName);
+                                                         + Indexes2[i].IndexName);
         FScript.Add('ALTER TABLE `' + TableName + '` DROP INDEX `'
-                                                + Indexes2[i].IndexName + '`;');
+                                                  + Indexes2[i].IndexName + '`;');
         FScript.Add('');
       end;
     end;
   end;
+
   // Índices nuevos o modificados
   for i := 0 to High(Indexes1) do
   begin
@@ -653,10 +673,10 @@ begin
         if not IndexesAreEqual(Indexes1[i], Indexes2[j]) then
         begin
           FScript.Add('-- Modificar índice: ' + TableName + '.' +
-                                                         Indexes1[i].IndexName);
+                                                           Indexes1[i].IndexName);
           if not Indexes1[i].IsPrimary then
             FScript.Add('ALTER TABLE `' + TableName + '` DROP INDEX `'
-                                                + Indexes1[i].IndexName + '`;');
+                                                  + Indexes1[i].IndexName + '`;');
           FScript.Add(GenerateIndexDefinition(TableName, Indexes1[i]) + ';');
           FScript.Add('');
         end;
@@ -666,7 +686,7 @@ begin
     if not Found then
     begin
       FScript.Add('-- Agregar índice: ' + TableName + '.' +
-                                                         Indexes1[i].IndexName);
+                                                           Indexes1[i].IndexName);
       FScript.Add(GenerateIndexDefinition(TableName, Indexes1[i]) + ';');
       FScript.Add('');
     end;
@@ -682,12 +702,13 @@ var
 begin
   Triggers1 := GetTriggers(FConn1, DB1);
   Triggers2 := GetTriggers(FConn2, DB2);
+
   FScript.Add('-- ========================================');
   FScript.Add('-- TRIGGERS');
   FScript.Add('-- ========================================');
   FScript.Add('');
-  // Triggers que existen en DB2 pero no en DB1
-  //(eliminar solo si NO está --nodelete)
+
+  // Triggers que existen en DB2 pero no en DB1 (eliminar solo si NO está --nodelete)
   if not FOptions.NoDelete then
   begin
     for i := 0 to High(Triggers2) do
@@ -704,12 +725,12 @@ begin
       if not Found then
       begin
         FScript.Add('-- Eliminar trigger: ' + Triggers2[i].TriggerName);
-        FScript.Add('DROP TRIGGER IF EXISTS `' +
-                                               Triggers2[i].TriggerName + '`;');
+        FScript.Add('DROP TRIGGER IF EXISTS `' + Triggers2[i].TriggerName + '`;');
         FScript.Add('');
       end;
     end;
   end;
+
   // Triggers nuevos o modificados
   for i := 0 to High(Triggers1) do
   begin
@@ -723,17 +744,16 @@ begin
         if not TriggersAreEqual(Triggers1[i], Triggers2[j]) then
         begin
           FScript.Add('-- Modificar trigger: ' + Triggers1[i].TriggerName);
-          FScript.Add('DROP TRIGGER IF EXISTS `' +
-                                               Triggers1[i].TriggerName + '`;');
+          FScript.Add('DROP TRIGGER IF EXISTS `' + Triggers1[i].TriggerName + '`;');
           FScript.Add('');
-          TriggerDef :=
-                    GetTriggerDefinition(FConn1, DB1, Triggers1[i].TriggerName);
+          TriggerDef := GetTriggerDefinition(FConn1, DB1, Triggers1[i].TriggerName);
           FScript.Add(TriggerDef + ' $$');
           FScript.Add('');
         end;
         Break;
       end;
     end;
+
     // Trigger nuevo
     if not Found then
     begin
@@ -745,6 +765,305 @@ begin
   end;
 end;
 
+function TDBComparer.GetPrimaryKeyColumns(Conn: TUniConnection;
+                                          const DBName,
+                                          TableName: string): TStringList;
+var
+  Query: TUniQuery;
+begin
+  Result := TStringList.Create;
+  Query := TUniQuery.Create(nil);
+  try
+    Query.Connection := Conn;
+    Query.SQL.Text :=
+      'SELECT COLUMN_NAME ' +
+      '  FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE ' +
+      ' WHERE TABLE_SCHEMA = ' + QuotedStr(DBName) +
+      '   AND TABLE_NAME = ' + QuotedStr(TableName) +
+      '   AND CONSTRAINT_NAME = ''PRIMARY'' ' +
+      'ORDER BY ORDINAL_POSITION';
+    Query.Open;
+
+    while not Query.Eof do
+    begin
+      Result.Add(Query.FieldByName('COLUMN_NAME').AsString);
+      Query.Next;
+    end;
+  finally
+    Query.Free;
+  end;
+end;
+
+function TDBComparer.BuildWhereClause(const PKColumns: TStringList;
+                                      Query: TUniQuery): string;
+var
+  i: Integer;
+  Value: string;
+begin
+  Result := '';
+  for i := 0 to PKColumns.Count - 1 do
+  begin
+    if i > 0 then
+      Result := Result + ' AND ';
+
+    if Query.FieldByName(PKColumns[i]).IsNull then
+      Result := Result + '`' + PKColumns[i] + '` IS NULL'
+    else
+    begin
+      case Query.FieldByName(PKColumns[i]).DataType of
+        ftString, ftWideString, ftMemo, ftWideMemo, ftFmtMemo:
+          Value := QuotedStr(Query.FieldByName(PKColumns[i]).AsString);
+        ftDate, ftTime, ftDateTime, ftTimeStamp:
+          Value := QuotedStr(FormatDateTime('yyyy-mm-dd hh:nn:ss',
+                            Query.FieldByName(PKColumns[i]).AsDateTime));
+        ftBoolean:
+          Value := IntToStr(Ord(Query.FieldByName(PKColumns[i]).AsBoolean));
+      else
+        Value := Query.FieldByName(PKColumns[i]).AsString;
+      end;
+      Result := Result + '`' + PKColumns[i] + '` = ' + Value;
+    end;
+  end;
+end;
+
+function TDBComparer.BuildUpdateStatement(const TableName: string;
+                                          const PKColumns: TStringList;
+                                          Query: TUniQuery): string;
+var
+  i: Integer;
+  FieldName, Value: string;
+  SetClause: string;
+begin
+  SetClause := '';
+
+  // Construir cláusula SET con todos los campos excepto las PKs
+  for i := 0 to Query.FieldCount - 1 do
+  begin
+    FieldName := Query.Fields[i].FieldName;
+
+    // Saltar campos de clave primaria
+    if PKColumns.IndexOf(FieldName) >= 0 then
+      Continue;
+
+    if SetClause <> '' then
+      SetClause := SetClause + ', ';
+
+    if Query.Fields[i].IsNull then
+      SetClause := SetClause + '`' + FieldName + '` = NULL'
+    else
+    begin
+      case Query.Fields[i].DataType of
+        ftString, ftWideString, ftMemo, ftWideMemo, ftFmtMemo:
+          Value := QuotedStr(Query.Fields[i].AsString);
+        ftDate, ftTime, ftDateTime, ftTimeStamp:
+          Value := QuotedStr(FormatDateTime('yyyy-mm-dd hh:nn:ss',
+                            Query.Fields[i].AsDateTime));
+        ftBoolean:
+          Value := IntToStr(Ord(Query.Fields[i].AsBoolean));
+      else
+        Value := Query.Fields[i].AsString;
+      end;
+      SetClause := SetClause + '`' + FieldName + '` = ' + Value;
+    end;
+  end;
+
+  Result := 'UPDATE `' + TableName + '` SET ' + SetClause +
+            ' WHERE ' + BuildWhereClause(PKColumns, Query);
+end;
+
+procedure TDBComparer.CompareAndSyncData(const DB1, DB2, TableName: string);
+var
+  Query1, Query2: TUniQuery;
+  PKColumns: TStringList;
+  Fields: TStringList;
+  Values: TStringList;
+  i: Integer;
+  FieldName: string;
+  WhereClause: string;
+  RecordExists: Boolean;
+  RecordsDiffer: Boolean;
+  InsertedCount, UpdatedCount, DeletedCount: Integer;
+begin
+  Query1 := TUniQuery.Create(nil);
+  Query2 := TUniQuery.Create(nil);
+  PKColumns := TStringList.Create;
+  Fields := TStringList.Create;
+  Values := TStringList.Create;
+  try
+    Query1.Connection := FConn1;
+    Query2.Connection := FConn2;
+
+    // Obtener columnas de clave primaria
+    PKColumns := GetPrimaryKeyColumns(FConn1, DB1, TableName);
+
+    if PKColumns.Count = 0 then
+    begin
+      FScript.Add('-- ADVERTENCIA: Tabla ' + TableName +
+                  ' no tiene clave primaria. Se omite comparación de datos.');
+      FScript.Add('');
+      Exit;
+    end;
+
+    InsertedCount := 0;
+    UpdatedCount := 0;
+    DeletedCount := 0;
+
+    FScript.Add('-- ========================================');
+    FScript.Add('-- SINCRONIZAR DATOS: ' + TableName);
+    FScript.Add('-- Clave primaria: ' + PKColumns.CommaText);
+    FScript.Add('-- ========================================');
+    FScript.Add('');
+
+    // Cambiar a las bases de datos correspondientes
+    FConn1.Database := DB1;
+    FConn2.Database := DB2;
+
+    // Obtener todos los registros de origen
+    Query1.SQL.Text := 'SELECT * FROM `' + TableName + '`';
+    Query1.Open;
+
+    while not Query1.Eof do
+    begin
+      // Construir WHERE con la clave primaria
+      WhereClause := BuildWhereClause(PKColumns, Query1);
+
+      // Verificar si existe en destino
+      Query2.Close;
+      Query2.SQL.Text := 'SELECT * FROM `' + TableName + '` WHERE ' + WhereClause;
+      Query2.Open;
+
+      RecordExists := not Query2.IsEmpty;
+
+      if not RecordExists then
+      begin
+        // Registro nuevo - INSERT
+        Fields.Clear;
+        Values.Clear;
+
+        for i := 0 to Query1.FieldCount - 1 do
+        begin
+          FieldName := Query1.Fields[i].FieldName;
+          Fields.Add('`' + FieldName + '`');
+
+          if Query1.Fields[i].IsNull then
+            Values.Add('NULL')
+          else
+          begin
+            case Query1.Fields[i].DataType of
+              ftString, ftWideString, ftMemo, ftWideMemo, ftFmtMemo:
+                Values.Add(QuotedStr(Query1.Fields[i].AsString));
+              ftDate, ftTime, ftDateTime, ftTimeStamp:
+                Values.Add(QuotedStr(FormatDateTime('yyyy-mm-dd hh:nn:ss',
+                                                    Query1.Fields[i].AsDateTime)));
+              ftBoolean:
+                Values.Add(IntToStr(Ord(Query1.Fields[i].AsBoolean)));
+            else
+              Values.Add(Query1.Fields[i].AsString);
+            end;
+          end;
+        end;
+
+        FScript.Add('-- INSERT nuevo registro (PK: ' + WhereClause + ')');
+        FScript.Add('INSERT INTO `' + TableName + '` (' +
+                   Fields.CommaText + ') VALUES (' +
+                   Values.CommaText + ');');
+        FScript.Add('');
+        Inc(InsertedCount);
+      end
+      else
+      begin
+        // Registro existe - verificar si hay diferencias
+        RecordsDiffer := False;
+
+        for i := 0 to Query1.FieldCount - 1 do
+        begin
+          FieldName := Query1.Fields[i].FieldName;
+
+          // Saltar campos de clave primaria
+          if PKColumns.IndexOf(FieldName) >= 0 then
+            Continue;
+
+          // Comparar valores
+          if Query1.Fields[i].IsNull <> Query2.FieldByName(FieldName).IsNull then
+          begin
+            RecordsDiffer := True;
+            Break;
+          end;
+
+          if not Query1.Fields[i].IsNull then
+          begin
+            if Query1.Fields[i].AsString <> Query2.FieldByName(FieldName).AsString then
+            begin
+              RecordsDiffer := True;
+              Break;
+            end;
+          end;
+        end;
+
+        if RecordsDiffer then
+        begin
+          // Generar UPDATE
+          FScript.Add('-- UPDATE registro modificado (PK: ' + WhereClause + ')');
+          FScript.Add(BuildUpdateStatement(TableName, PKColumns, Query1) + ';');
+          FScript.Add('');
+          Inc(UpdatedCount);
+        end;
+      end;
+
+      Query1.Next;
+    end;
+
+    // Verificar registros que están en destino pero no en origen (DELETE)
+    if not FOptions.NoDelete then
+    begin
+      Query2.Close;
+      Query2.SQL.Text := 'SELECT * FROM `' + TableName + '`';
+      Query2.Open;
+
+      while not Query2.Eof do
+      begin
+        WhereClause := BuildWhereClause(PKColumns, Query2);
+
+        // Verificar si existe en origen
+        Query1.Close;
+        Query1.SQL.Text := 'SELECT * FROM `' + TableName + '` WHERE ' + WhereClause;
+        Query1.Open;
+
+        if Query1.IsEmpty then
+        begin
+          FScript.Add('-- DELETE registro eliminado (PK: ' + WhereClause + ')');
+          FScript.Add('DELETE FROM `' + TableName + '` WHERE ' + WhereClause + ';');
+          FScript.Add('');
+          Inc(DeletedCount);
+        end;
+
+        Query2.Next;
+      end;
+    end;
+
+    // Resumen
+    FScript.Add('-- Resumen ' + TableName + ': ' +
+                IntToStr(InsertedCount) + ' insertados, ' +
+                IntToStr(UpdatedCount) + ' actualizados' +
+                IfThen(FOptions.NoDelete, '', ', ' +
+                       IntToStr(DeletedCount) + ' eliminados'));
+    FScript.Add('');
+
+    // Restaurar base de datos
+    FConn1.Database := 'information_schema';
+    FConn2.Database := 'information_schema';
+  finally
+    Query1.Free;
+    Query2.Free;
+    PKColumns.Free;
+    Fields.Free;
+    Values.Free;
+  end;
+end;
+
+// ==========================================
+// PROCEDIMIENTO COPYDATA (MOVER ANTES DE COMPARETABLES)
+// ==========================================
 procedure TDBComparer.CopyData(const DB1, DB2, TableName: string);
 var
   Query: TUniQuery;
@@ -752,7 +1071,7 @@ var
   Fields: TStringList;
   Values: TStringList;
   i: Integer;
-  FieldName, FieldValue: string;
+  FieldName: string;
 begin
   Query := TUniQuery.Create(nil);
   InsertQuery := TUniQuery.Create(nil);
@@ -761,21 +1080,26 @@ begin
   try
     Query.Connection := FConn1;
     InsertQuery.Connection := FConn2;
+
     // Cambiar a la base de datos origen
     FConn1.Database := DB1;
+
     // Obtener todos los registros de la tabla
     Query.SQL.Text := 'SELECT * FROM `' + TableName + '`';
     Query.Open;
+
     if Query.RecordCount > 0 then
     begin
       FScript.Add('-- ========================================');
       FScript.Add('-- COPIAR DATOS: ' + TableName);
       FScript.Add('-- ========================================');
       FScript.Add('');
+
       while not Query.Eof do
       begin
         Fields.Clear;
         Values.Clear;
+
         // Construir lista de campos y valores
         for i := 0 to Query.FieldCount - 1 do
         begin
@@ -799,14 +1123,18 @@ begin
             end;
           end;
         end;
+
         // Generar INSERT
-        FScript.Add('INSERT INTO `' + TableName + '` (' +
+        // NOTA: Se recomienda INSERT IGNORE para evitar errores
+        //de clave duplicada si se ejecuta varias veces
+        FScript.Add('INSERT IGNORE INTO `' + TableName + '` (' +
                    Fields.CommaText + ') VALUES (' +
                    Values.CommaText + ');');
         Query.Next;
       end;
       FScript.Add('');
     end;
+
     // Restaurar base de datos
     FConn1.Database := 'information_schema';
   finally
@@ -846,7 +1174,6 @@ begin
         end;
       end;
     end;
-
     for i := 0 to Tables1.Count - 1 do
     begin
       if Tables2.IndexOf(Tables1[i]) = -1 then
@@ -866,9 +1193,6 @@ begin
           end;
           FScript.Add(');');
           FScript.Add('');
-          // Si está --with-data, copiar datos
-          if FOptions.WithData then
-            CopyData(DB1, DB2, Tables1[i]);
         finally
           Table1.Free;
         end;
@@ -892,7 +1216,7 @@ begin
                 if not ColumnsAreEqual(Col1, Col2) then
                 begin
                   FScript.Add('-- Modificar columna: ' + Tables1[i] + '.'
-                                                             + Col1.ColumnName);
+                                                               + Col1.ColumnName);
                   FScript.Add('ALTER TABLE `' + Tables1[i] +
                               '` MODIFY COLUMN ' +
                              GenerateColumnDefinition(Col1) + ';');
@@ -904,7 +1228,7 @@ begin
             if not Found then
             begin
               FScript.Add('-- Agregar columna: ' + Tables1[i] + '.'
-                                                             + Col1.ColumnName);
+                                                               + Col1.ColumnName);
               FScript.Add('ALTER TABLE `' + Tables1[i] + '` ADD COLUMN ' +
                          GenerateColumnDefinition(Col1) + ';');
               FScript.Add('');
@@ -929,7 +1253,7 @@ begin
               if not Found then
               begin
                 FScript.Add('-- Eliminar columna: ' + Tables1[i] + '.'
-                                                             + Col2.ColumnName);
+                                                               + Col2.ColumnName);
                 FScript.Add('ALTER TABLE `' + Tables1[i] +
                             '` DROP COLUMN `' + Col2.ColumnName + '`;');
                 FScript.Add('');
@@ -940,11 +1264,15 @@ begin
           Table1.Free;
           Table2.Free;
         end;
+
         // Comparar índices de la tabla
         CompareIndexes(FConn1, FConn2, DB1, DB2, Tables1[i]);
+
         // Si está --with-data, copiar datos (INSERT IGNORE para no duplicar)
         if FOptions.WithData then
-          CopyData(DB1, DB2, Tables1[i]);
+          CopyData(DB1, DB2, Tables1[i])
+        else if FOptions.WithDataDiff then
+          CompareAndSyncData(DB1, DB2, Tables1[i]);
       end;
     end;
   finally
@@ -1020,16 +1348,20 @@ begin
   if FOptions.WithTriggers then
     FScript.Add('-- Incluye: TRIGGERS');
   if FOptions.WithData then
-    FScript.Add('-- Incluye: DATOS');
+    FScript.Add('-- Incluye: DATOS (copia completa)');
+  if FOptions.WithDataDiff then
+    FScript.Add('-- Incluye: DATOS (solo diferencias por PK)');
   FScript.Add('-- ========================================');
   FScript.Add('');
   FScript.Add('USE `' + DB2 + '`;');
   FScript.Add('');
   FScript.Add('SET FOREIGN_KEY_CHECKS = 0;');
   FScript.Add('');
+
   CompareTables(DB1, DB2);
   CompareViews(DB1, DB2);
   CompareProcedures(DB1, DB2);
+
   if FOptions.WithTriggers then
   begin
     FScript.Add('DELIMITER $');
@@ -1038,6 +1370,7 @@ begin
     FScript.Add('DELIMITER ;');
     FScript.Add('');
   end;
+
   FScript.Add('SET FOREIGN_KEY_CHECKS = 1;');
   FScript.Add('');
   Result := FScript.Text;
@@ -1054,13 +1387,18 @@ begin
           'servidor2:puerto2\database2 usuario2\password2 [opciones]');
   Writeln('');
   Writeln('Opciones:');
-  Writeln('  --nodelete       No elimina tablas, columnas ni índices en destino');
-  Writeln('  --with-triggers  Incluye comparación de triggers');
-  Writeln('  --with-data      Copia datos de origen a destino (INSERT)');
+  Writeln('  --nodelete        No elimina tablas, columnas ni índices en destino');
+  Writeln('  --with-triggers   Incluye comparación de triggers');
+  Writeln('  --with-data       Copia todos los datos de origen a destino (INSERT)');
+  Writeln('  --with-data-diff  Sincroniza datos comparando por clave primaria');
+  Writeln('                    (INSERT nuevos, UPDATE modificados, DELETE si no --nodelete)');
   Writeln('');
   Writeln('Ejemplo:');
   Writeln('  DBComparer localhost:3306\midb_prod root\pass123 '+
           'localhost:3306\midb_dev root\pass456 --nodelete --with-triggers');
+  Writeln('');
+  Writeln('  DBComparer localhost:3306\prod root\pass '+
+          'localhost:3306\dev root\pass --with-data-diff --nodelete');
   Writeln('');
   Writeln('El resultado se imprime por la salida estándar. '+
           'Para guardarlo en archivo:');
@@ -1112,15 +1450,26 @@ begin
   Result.NoDelete := False;
   Result.WithTriggers := False;
   Result.WithData := False;
+  Result.WithDataDiff := False;
+
   for i := 5 to ParamCount do
   begin
     Param := LowerCase(ParamStr(i));
-    if SameText(Param,'--nodelete') then
+    if Param = '--nodelete' then
       Result.NoDelete := True
-    else if SameText(Param, '--with-triggers') then
+    else if Param = '--with-triggers' then
       Result.WithTriggers := True
-    else if SameText(Param, '--with-data') then
-      Result.WithData := True;
+    else if Param = '--with-data' then
+      Result.WithData := True
+    else if Param = '--with-data-diff' then
+      Result.WithDataDiff := True;
+  end;
+
+  // Validación: no se pueden usar ambas opciones de datos al mismo tiempo
+  if Result.WithData and Result.WithDataDiff then
+  begin
+    Writeln(ErrOutput, 'ERROR: No puede usar --with-data y --with-data-diff simultáneamente');
+    Halt(1);
   end;
 end;
 
@@ -1134,12 +1483,14 @@ begin
   try
     if ParamCount < 4 then
       ShowUsage;
+
     // Parsear parámetros
     ParseConnectionString(ParamStr(1), Server1, Port1, DB1);
     ParseCredentials(ParamStr(2), User1, Pass1);
     ParseConnectionString(ParamStr(3), Server2, Port2, DB2);
     ParseCredentials(ParamStr(4), User2, Pass2);
     Options := ParseOptions;
+
     Writeln(ErrOutput, 'Conectando a servidores...');
     Writeln(ErrOutput, 'Origen: ' + Server1 + ':' + Port1 + '\' + DB1);
     Writeln(ErrOutput, 'Destino: ' + Server2 + ':' + Port2 + '\' + DB2);
@@ -1148,8 +1499,11 @@ begin
     if Options.WithTriggers then
       Writeln(ErrOutput, 'Incluye: TRIGGERS');
     if Options.WithData then
-      Writeln(ErrOutput, 'Incluye: DATOS');
+      Writeln(ErrOutput, 'Incluye: DATOS (copia completa)');
+    if Options.WithDataDiff then
+      Writeln(ErrOutput, 'Incluye: DATOS (sincronización por PK)');
     Writeln(ErrOutput, '');
+
     // Crear comparador
     Comparer := TDBComparer.Create(
       Server1, User1, Pass1, Port1, DB1,
@@ -1159,8 +1513,10 @@ begin
     try
       Writeln(ErrOutput, 'Generando script de comparación...');
       Script := Comparer.GenerateScript(DB1, DB2);
+
       // Imprimir por salida estándar
       Write(Script);
+
       Writeln(ErrOutput, '');
       Writeln(ErrOutput, 'Script generado exitosamente.');
     finally
