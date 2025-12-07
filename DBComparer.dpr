@@ -4,6 +4,7 @@ program DBComparerConsole;
 uses
   System.SysUtils, System.Classes, Data.DB, Uni, MySQLUniProvider,
   System.Generics.Collections, system.StrUtils;
+
 type
   TColumnInfo = record
     ColumnName: string;
@@ -15,31 +16,54 @@ type
     CharMaxLength: string;
     ColumnComment: string;
   end;
+
   TIndexColumn = record
     ColumnName: string;
     SeqInIndex: Integer;
   end;
+
   TIndexInfo = record
     IndexName: string;
     IsUnique: Boolean;
     IsPrimary: Boolean;
     Columns: TArray<TIndexColumn>;
   end;
+
+  TTriggerInfo = record
+    TriggerName: string;
+    EventManipulation: string;
+    ActionTiming: string;
+    ActionStatement: string;
+    EventObjectTable: string;
+  end;
+
   TTableInfo = class
     TableName: string;
     Columns: TList<TColumnInfo>;
     constructor Create;
     destructor Destroy; override;
   end;
+
+  TCompareOptions = record
+    NoDelete: Boolean;
+    WithTriggers: Boolean;
+    WithData: Boolean;
+  end;
+
   TDBComparer = class
   private
     FConn1, FConn2: TUniConnection;
     FScript: TStringList;
+    FOptions: TCompareOptions;
     function GetTables(Conn: TUniConnection; const DBName: string): TStringList;
     function GetTableStructure(Conn: TUniConnection;
                                const DBName, TableName: string): TTableInfo;
     function GetTableIndexes(Conn: TUniConnection;
                              const DBName, TableName: string): TArray<TIndexInfo>;
+    function GetTriggers(Conn: TUniConnection;
+                        const DBName: string): TArray<TTriggerInfo>;
+    function GetTriggerDefinition(Conn: TUniConnection;
+                                 const DBName, TriggerName: string): string;
     function GetViews(Conn: TUniConnection; const DBName: string): TStringList;
     function GetViewDefinition(Conn: TUniConnection;
                                const DBName, ViewName: string): string;
@@ -50,34 +74,47 @@ type
     procedure CompareTables(const DB1, DB2: string);
     procedure CompareIndexes(Conn1, Conn2: TUniConnection;
                              const DB1, DB2, TableName: string);
+    procedure CompareTriggers(const DB1, DB2: string);
     procedure CompareViews(const DB1, DB2: string);
     procedure CompareProcedures(const DB1, DB2: string);
+    procedure CopyData(const DB1, DB2, TableName: string);
     function ColumnsAreEqual(const Col1, Col2: TColumnInfo): Boolean;
     function IndexesAreEqual(const Idx1, Idx2: TIndexInfo): Boolean;
+    function TriggersAreEqual(const Trg1, Trg2: TTriggerInfo): Boolean;
     function GenerateColumnDefinition(const Col: TColumnInfo): string;
     function GenerateIndexDefinition(const TableName: string;
                                      const Idx: TIndexInfo): string;
+    function StripDefiner(const SQL: string): string;
   public
     constructor Create(const Server1, User1, Pass1, Port1, DB1: string;
-                       const Server2, User2, Pass2, Port2, DB2: string);
+                       const Server2, User2, Pass2, Port2, DB2: string;
+                       const Options: TCompareOptions);
     destructor Destroy; override;
     function GenerateScript(const DB1, DB2: string): string;
   end;
+
 { TTableInfo }
+
 constructor TTableInfo.Create;
 begin
   Columns := TList<TColumnInfo>.Create;
 end;
+
 destructor TTableInfo.Destroy;
 begin
   Columns.Free;
   inherited;
 end;
+
 { TDBComparer }
+
 constructor TDBComparer.Create(const Server1, User1, Pass1, Port1, DB1: string;
-                               const Server2, User2, Pass2, Port2, DB2: string);
+                               const Server2, User2, Pass2, Port2, DB2: string;
+                               const Options: TCompareOptions);
 begin
   FScript := TStringList.Create;
+  FOptions := Options;
+
   // Conexión 1
   FConn1 := TUniConnection.Create(nil);
   FConn1.ProviderName := 'MySQL';
@@ -87,6 +124,7 @@ begin
   FConn1.Password := Pass1;
   FConn1.Database := 'information_schema';
   FConn1.Connected := True;
+
   // Conexión 2
   FConn2 := TUniConnection.Create(nil);
   FConn2.ProviderName := 'MySQL';
@@ -215,27 +253,23 @@ begin
       begin
         if Query.FieldByName('INDEX_NAME').AsString <> LastIndexName then
         begin
-          // Guardar índice anterior
           if LastIndexName <> '' then
           begin
             CurrentIndex.Columns := ColList.ToArray;
             IndexList.Add(CurrentIndex);
             ColList.Clear;
           end;
-          // Nuevo índice
           LastIndexName := Query.FieldByName('INDEX_NAME').AsString;
           CurrentIndex.IndexName := LastIndexName;
           CurrentIndex.IsPrimary := (LastIndexName = 'PRIMARY');
           CurrentIndex.IsUnique :=
                                 (Query.FieldByName('NON_UNIQUE').AsInteger = 0);
         end;
-        // Agregar columna al índice
         IndexCol.ColumnName := Query.FieldByName('COLUMN_NAME').AsString;
         IndexCol.SeqInIndex := Query.FieldByName('SEQ_IN_INDEX').AsInteger;
         ColList.Add(IndexCol);
         Query.Next;
       end;
-      // Guardar último índice
       if LastIndexName <> '' then
       begin
         CurrentIndex.Columns := ColList.ToArray;
@@ -248,6 +282,72 @@ begin
   finally
     IndexList.Free;
     ColList.Free;
+  end;
+end;
+
+function TDBComparer.GetTriggers(Conn: TUniConnection;
+                                const DBName: string): TArray<TTriggerInfo>;
+var
+  Query: TUniQuery;
+  TriggerList: TList<TTriggerInfo>;
+  Trigger: TTriggerInfo;
+begin
+  TriggerList := TList<TTriggerInfo>.Create;
+  try
+    Query := TUniQuery.Create(nil);
+    try
+      Query.Connection := Conn;
+      Query.SQL.Text :=
+        'SELECT TRIGGER_NAME, ' +
+        '       EVENT_MANIPULATION, ' +
+        '       ACTION_TIMING, ' +
+        '       ACTION_STATEMENT, ' +
+        '       EVENT_OBJECT_TABLE ' +
+        '  FROM INFORMATION_SCHEMA.TRIGGERS ' +
+        ' WHERE TRIGGER_SCHEMA = ' + QuotedStr(DBName) + ' ' +
+        'ORDER BY EVENT_OBJECT_TABLE, TRIGGER_NAME';
+      Query.Open;
+      while not Query.Eof do
+      begin
+        Trigger.TriggerName := Query.FieldByName('TRIGGER_NAME').AsString;
+        Trigger.EventManipulation :=
+                               Query.FieldByName('EVENT_MANIPULATION').AsString;
+        Trigger.ActionTiming := Query.FieldByName('ACTION_TIMING').AsString;
+        Trigger.ActionStatement :=
+                                 Query.FieldByName('ACTION_STATEMENT').AsString;
+        Trigger.EventObjectTable :=
+                               Query.FieldByName('EVENT_OBJECT_TABLE').AsString;
+        TriggerList.Add(Trigger);
+        Query.Next;
+      end;
+    finally
+      Query.Free;
+    end;
+    Result := TriggerList.ToArray;
+  finally
+    TriggerList.Free;
+  end;
+end;
+
+function TDBComparer.GetTriggerDefinition(Conn: TUniConnection;
+                                         const DBName,
+                                         TriggerName: string): string;
+var
+  Query: TUniQuery;
+  OldDB: string;
+begin
+  Query := TUniQuery.Create(nil);
+  try
+    Query.Connection := Conn;
+    OldDB := Conn.Database;
+    Conn.Database := DBName;
+    Query.SQL.Text := 'SHOW CREATE TRIGGER `' + TriggerName + '`';
+    Query.Open;
+    Result := Query.Fields[2].AsString;
+    Result := StripDefiner(Result);
+    Conn.Database := OldDB;
+  finally
+    Query.Free;
   end;
 end;
 
@@ -275,13 +375,35 @@ begin
   end;
 end;
 
+function TDBComparer.StripDefiner(const SQL: string): string;
+var
+  PosDefiner, PosEnd: Integer;
+  UpperSQL: string;
+begin
+  Result := SQL;
+  UpperSQL := UpperCase(SQL);
+  PosDefiner := Pos('DEFINER=', UpperSQL);
+
+  if PosDefiner > 0 then
+  begin
+    // Buscar el final del DEFINER (siguiente espacio antes de palabra clave)
+    PosEnd := PosEx('SQL', UpperSQL, PosDefiner);
+    if PosEnd = 0 then
+      PosEnd := PosEx('PROCEDURE', UpperSQL, PosDefiner);
+    if PosEnd = 0 then
+      PosEnd := PosEx('TRIGGER', UpperSQL, PosDefiner);
+
+    if PosEnd > 0 then
+      Result := Trim(Copy(Result, 1, PosDefiner - 1) +
+                    Copy(Result, PosEnd, Length(Result)));
+  end;
+end;
+
 function TDBComparer.GetViewDefinition(Conn: TUniConnection;
                                        const DBName, ViewName: string): string;
 var
   Query: TUniQuery;
   OldDB: string;
-  ViewDef: string;
-  PosDefiner, PosSQL: Integer;
 begin
   Query := TUniQuery.Create(nil);
   try
@@ -290,23 +412,8 @@ begin
     Conn.Database := DBName;
     Query.SQL.Text := 'SHOW CREATE VIEW `' + ViewName + '`';
     Query.Open;
-    ViewDef := Query.Fields[1].AsString;
-
-    // Eliminar la cláusula DEFINER
-    PosDefiner := Pos('DEFINER=', UpperCase(ViewDef));
-    if PosDefiner > 0 then
-    begin
-      // Buscar el siguiente espacio o la palabra SQL después del DEFINER
-      PosSQL := PosEx('SQL', UpperCase(ViewDef), PosDefiner);
-      if PosSQL > 0 then
-      begin
-        // Eliminar desde DEFINER hasta justo antes de SQL SECURITY
-        ViewDef := Copy(ViewDef, 1, PosDefiner - 1) +
-                   Copy(ViewDef, PosSQL, Length(ViewDef));
-      end;
-    end;
-
-    Result := Trim(ViewDef);
+    Result := Query.Fields[1].AsString;
+    Result := StripDefiner(Result);
     Conn.Database := OldDB;
   finally
     Query.Free;
@@ -343,8 +450,6 @@ function TDBComparer.GetProcedureDefinition(Conn: TUniConnection;
 var
   Query: TUniQuery;
   OldDB: string;
-  ProcDef: string;
-  PosDefiner, PosProcedure: Integer;
 begin
   Query := TUniQuery.Create(nil);
   try
@@ -353,23 +458,8 @@ begin
     Conn.Database := DBName;
     Query.SQL.Text := 'SHOW CREATE PROCEDURE `' + ProcName + '`';
     Query.Open;
-    ProcDef := Query.Fields[2].AsString;
-
-    // Eliminar la cláusula DEFINER
-    PosDefiner := Pos('DEFINER=', UpperCase(ProcDef));
-    if PosDefiner > 0 then
-    begin
-      // Buscar la palabra PROCEDURE después del DEFINER
-      PosProcedure := PosEx('PROCEDURE', UpperCase(ProcDef), PosDefiner);
-      if PosProcedure > 0 then
-      begin
-        // Eliminar desde DEFINER hasta justo antes de PROCEDURE
-        ProcDef := Copy(ProcDef, 1, PosDefiner - 1) +
-                   Copy(ProcDef, PosProcedure, Length(ProcDef));
-      end;
-    end;
-
-    Result := Trim(ProcDef);
+    Result := Query.Fields[2].AsString;
+    Result := StripDefiner(Result);
     Conn.Database := OldDB;
   finally
     Query.Free;
@@ -378,46 +468,34 @@ end;
 
 function TDBComparer.ColumnsAreEqual(const Col1, Col2: TColumnInfo): Boolean;
 
-  // FUNCIÓN AUXILIAR DE NORMALIZACIÓN CORREGIDA
   function NormalizeType(const AType: string): string;
   var
     S: string;
     PStart, PEnd: Integer;
   begin
     S := LowerCase(Trim(AType));
-    // Solo normalizamos la anchura para los tipos ENTEROS
-    //(donde es solo display width).
-    // Mantenemos la precisión para VARCHAR, DECIMAL, etc.
-    //ya que es estructural.
     if StartsText('int', S) or
        StartsText('tinyint', S) or
        StartsText('smallint', S) then
     begin
       PStart := Pos('(', S);
       PEnd := Pos(')', S);
-      // Si encontramos (XX), lo eliminamos para normalizar
       if (PStart > 0) and (PEnd > PStart) then
-      begin
-        // Resultado es la parte antes de '(' + la parte después de ')'
         S := Copy(S, 1, PStart - 1) + Copy(S, PEnd + 1, MaxInt);
-      end;
     end;
-    // Eliminamos cualquier espacio sobrante
-    // (ej: 'int unsigned' -> 'intunsigned')
     Result := StringReplace(S, ' ', '', [rfReplaceAll]);
   end;
-  // FUNCIÓN AUXILIAR PARA NORMALIZAR EXTRA
+
   function NormalizeExtra(const AExtra: string): string;
   begin
     Result := LowerCase(Trim(AExtra));
   end;
+
 var
   Typ1, Typ2: string;
   Null1, Null2, Key1, Key2, Extra1, Extra2, Def1, Def2: string;
   IsAutoInc: Boolean;
 begin
-  // --- 1. NORMALIZAR TODOS LOS COMPONENTES ---
-  // A partir de aquí, Typ1/Typ2 SOLO habrán perdido el (X) si eran tipos INT.
   Typ1 := NormalizeType(Col1.DataType);
   Typ2 := NormalizeType(Col2.DataType);
   Null1 := LowerCase(Trim(Col1.IsNullable));
@@ -428,27 +506,22 @@ begin
   Extra2 := NormalizeExtra(Col2.Extra);
   Def1 := Trim(Col1.ColumnDefault);
   Def2 := Trim(Col2.ColumnDefault);
-  // 2. Comparación básica de atributos normalizados
-  Result := (Typ1 = Typ2) and // Ahora varchar(255) <> varchar(20)
+  Result := (Typ1 = Typ2) and
             (Null1 = Null2) and
             (Key1 = Key2) and
             (Extra1 = Extra2);
-  // 3. TRATAMIENTO DE DEFAULT
   if Result then
   begin
     IsAutoInc := (Pos('auto_increment', Extra1) > 0)
                   or (Pos('auto_increment', Extra2) > 0);
     if not IsAutoInc then
     begin
-      // Normalizamos: Si el default es 'NULL' (como cadena),
-      //lo tratamos como vacío para la comparación
       if SameText(Def1, 'NULL') then Def1 := '';
       if SameText(Def2, 'NULL') then Def2 := '';
       if not SameText(Def1, Def2) then
         Result := False;
     end;
   end;
-  // 4. Comentario
   if Result then
     Result := SameText(Col1.ColumnComment, Col2.ColumnComment);
 end;
@@ -473,6 +546,14 @@ begin
       end;
     end;
   end;
+end;
+
+function TDBComparer.TriggersAreEqual(const Trg1, Trg2: TTriggerInfo): Boolean;
+begin
+  Result := (Trg1.TriggerName = Trg2.TriggerName) and
+            (Trg1.EventManipulation = Trg2.EventManipulation) and
+            (Trg1.ActionTiming = Trg2.ActionTiming) and
+            (Trim(Trg1.ActionStatement) = Trim(Trg2.ActionStatement));
 end;
 
 function TDBComparer.GenerateColumnDefinition(const Col: TColumnInfo): string;
@@ -533,27 +614,31 @@ var
 begin
   Indexes1 := GetTableIndexes(Conn1, DB1, TableName);
   Indexes2 := GetTableIndexes(Conn2, DB2, TableName);
-  // Índices que existen en DB2 pero no en DB1 (eliminar)
-  for i := 0 to High(Indexes2) do
+  // Índices que existen en DB2 pero no en DB1
+  //(eliminar solo si NO está --nodelete)
+  if not FOptions.NoDelete then
   begin
-    if Indexes2[i].IsPrimary then
-      Continue; // No eliminar PRIMARY KEY automáticamente
-    Found := False;
-    for j := 0 to High(Indexes1) do
+    for i := 0 to High(Indexes2) do
     begin
-      if Indexes1[j].IndexName = Indexes2[i].IndexName then
+      if Indexes2[i].IsPrimary then
+        Continue;
+      Found := False;
+      for j := 0 to High(Indexes1) do
       begin
-        Found := True;
-        Break;
+        if Indexes1[j].IndexName = Indexes2[i].IndexName then
+        begin
+          Found := True;
+          Break;
+        end;
       end;
-    end;
-    if not Found then
-    begin
-      FScript.Add('-- Eliminar índice: ' + TableName + '.'
+      if not Found then
+      begin
+        FScript.Add('-- Eliminar índice: ' + TableName + '.'
                                                        + Indexes2[i].IndexName);
-      FScript.Add('ALTER TABLE `' + TableName + '` DROP INDEX `'
+        FScript.Add('ALTER TABLE `' + TableName + '` DROP INDEX `'
                                                 + Indexes2[i].IndexName + '`;');
-      FScript.Add('');
+        FScript.Add('');
+      end;
     end;
   end;
   // Índices nuevos o modificados
@@ -565,7 +650,6 @@ begin
       if Indexes1[i].IndexName = Indexes2[j].IndexName then
       begin
         Found := True;
-        // Comparar definición
         if not IndexesAreEqual(Indexes1[i], Indexes2[j]) then
         begin
           FScript.Add('-- Modificar índice: ' + TableName + '.' +
@@ -579,7 +663,6 @@ begin
         Break;
       end;
     end;
-    // Índice nuevo
     if not Found then
     begin
       FScript.Add('-- Agregar índice: ' + TableName + '.' +
@@ -587,6 +670,150 @@ begin
       FScript.Add(GenerateIndexDefinition(TableName, Indexes1[i]) + ';');
       FScript.Add('');
     end;
+  end;
+end;
+
+procedure TDBComparer.CompareTriggers(const DB1, DB2: string);
+var
+  Triggers1, Triggers2: TArray<TTriggerInfo>;
+  i, j: Integer;
+  Found: Boolean;
+  TriggerDef: string;
+begin
+  Triggers1 := GetTriggers(FConn1, DB1);
+  Triggers2 := GetTriggers(FConn2, DB2);
+  FScript.Add('-- ========================================');
+  FScript.Add('-- TRIGGERS');
+  FScript.Add('-- ========================================');
+  FScript.Add('');
+  // Triggers que existen en DB2 pero no en DB1
+  //(eliminar solo si NO está --nodelete)
+  if not FOptions.NoDelete then
+  begin
+    for i := 0 to High(Triggers2) do
+    begin
+      Found := False;
+      for j := 0 to High(Triggers1) do
+      begin
+        if Triggers1[j].TriggerName = Triggers2[i].TriggerName then
+        begin
+          Found := True;
+          Break;
+        end;
+      end;
+      if not Found then
+      begin
+        FScript.Add('-- Eliminar trigger: ' + Triggers2[i].TriggerName);
+        FScript.Add('DROP TRIGGER IF EXISTS `' +
+                                               Triggers2[i].TriggerName + '`;');
+        FScript.Add('');
+      end;
+    end;
+  end;
+  // Triggers nuevos o modificados
+  for i := 0 to High(Triggers1) do
+  begin
+    Found := False;
+    for j := 0 to High(Triggers2) do
+    begin
+      if Triggers1[i].TriggerName = Triggers2[j].TriggerName then
+      begin
+        Found := True;
+        // Si son diferentes, recrear
+        if not TriggersAreEqual(Triggers1[i], Triggers2[j]) then
+        begin
+          FScript.Add('-- Modificar trigger: ' + Triggers1[i].TriggerName);
+          FScript.Add('DROP TRIGGER IF EXISTS `' +
+                                               Triggers1[i].TriggerName + '`;');
+          FScript.Add('');
+          TriggerDef :=
+                    GetTriggerDefinition(FConn1, DB1, Triggers1[i].TriggerName);
+          FScript.Add(TriggerDef + ' $$');
+          FScript.Add('');
+        end;
+        Break;
+      end;
+    end;
+    // Trigger nuevo
+    if not Found then
+    begin
+      FScript.Add('-- Agregar trigger: ' + Triggers1[i].TriggerName);
+      TriggerDef := GetTriggerDefinition(FConn1, DB1, Triggers1[i].TriggerName);
+      FScript.Add(TriggerDef + ' $$');
+      FScript.Add('');
+    end;
+  end;
+end;
+
+procedure TDBComparer.CopyData(const DB1, DB2, TableName: string);
+var
+  Query: TUniQuery;
+  InsertQuery: TUniQuery;
+  Fields: TStringList;
+  Values: TStringList;
+  i: Integer;
+  FieldName, FieldValue: string;
+begin
+  Query := TUniQuery.Create(nil);
+  InsertQuery := TUniQuery.Create(nil);
+  Fields := TStringList.Create;
+  Values := TStringList.Create;
+  try
+    Query.Connection := FConn1;
+    InsertQuery.Connection := FConn2;
+    // Cambiar a la base de datos origen
+    FConn1.Database := DB1;
+    // Obtener todos los registros de la tabla
+    Query.SQL.Text := 'SELECT * FROM `' + TableName + '`';
+    Query.Open;
+    if Query.RecordCount > 0 then
+    begin
+      FScript.Add('-- ========================================');
+      FScript.Add('-- COPIAR DATOS: ' + TableName);
+      FScript.Add('-- ========================================');
+      FScript.Add('');
+      while not Query.Eof do
+      begin
+        Fields.Clear;
+        Values.Clear;
+        // Construir lista de campos y valores
+        for i := 0 to Query.FieldCount - 1 do
+        begin
+          FieldName := Query.Fields[i].FieldName;
+          Fields.Add('`' + FieldName + '`');
+
+          if Query.Fields[i].IsNull then
+            Values.Add('NULL')
+          else
+          begin
+            case Query.Fields[i].DataType of
+              ftString, ftWideString, ftMemo, ftWideMemo, ftFmtMemo:
+                Values.Add(QuotedStr(Query.Fields[i].AsString));
+              ftDate, ftTime, ftDateTime, ftTimeStamp:
+                Values.Add(QuotedStr(FormatDateTime('yyyy-mm-dd hh:nn:ss',
+                                                  Query.Fields[i].AsDateTime)));
+              ftBoolean:
+                Values.Add(IntToStr(Ord(Query.Fields[i].AsBoolean)));
+            else
+              Values.Add(Query.Fields[i].AsString);
+            end;
+          end;
+        end;
+        // Generar INSERT
+        FScript.Add('INSERT INTO `' + TableName + '` (' +
+                   Fields.CommaText + ') VALUES (' +
+                   Values.CommaText + ');');
+        Query.Next;
+      end;
+      FScript.Add('');
+    end;
+    // Restaurar base de datos
+    FConn1.Database := 'information_schema';
+  finally
+    Query.Free;
+    InsertQuery.Free;
+    Fields.Free;
+    Values.Free;
   end;
 end;
 
@@ -605,19 +832,26 @@ begin
     FScript.Add('-- COMPARACIÓN DE TABLAS');
     FScript.Add('-- ========================================');
     FScript.Add('');
-    for i := 0 to Tables2.Count - 1 do
+
+    // Tablas eliminadas (solo si NO está --nodelete)
+    if not FOptions.NoDelete then
     begin
-      if Tables1.IndexOf(Tables2[i]) = -1 then
+      for i := 0 to Tables2.Count - 1 do
       begin
-        FScript.Add('-- Tabla eliminada: ' + Tables2[i]);
-        FScript.Add('DROP TABLE IF EXISTS `' + Tables2[i] + '`;');
-        FScript.Add('');
+        if Tables1.IndexOf(Tables2[i]) = -1 then
+        begin
+          FScript.Add('-- Tabla eliminada: ' + Tables2[i]);
+          FScript.Add('DROP TABLE IF EXISTS `' + Tables2[i] + '`;');
+          FScript.Add('');
+        end;
       end;
     end;
+
     for i := 0 to Tables1.Count - 1 do
     begin
       if Tables2.IndexOf(Tables1[i]) = -1 then
       begin
+        // Tabla nueva
         FScript.Add('-- Tabla nueva: ' + Tables1[i]);
         Table1 := GetTableStructure(FConn1, DB1, Tables1[i]);
         try
@@ -632,12 +866,16 @@ begin
           end;
           FScript.Add(');');
           FScript.Add('');
+          // Si está --with-data, copiar datos
+          if FOptions.WithData then
+            CopyData(DB1, DB2, Tables1[i]);
         finally
           Table1.Free;
         end;
       end
       else
       begin
+        // Tabla existente - comparar estructura
         Table1 := GetTableStructure(FConn1, DB1, Tables1[i]);
         Table2 := GetTableStructure(FConn2, DB2, Tables1[i]);
         try
@@ -672,25 +910,30 @@ begin
               FScript.Add('');
             end;
           end;
-          for j := 0 to Table2.Columns.Count - 1 do
+
+          // Columnas eliminadas (solo si NO está --nodelete)
+          if not FOptions.NoDelete then
           begin
-            Col2 := Table2.Columns[j];
-            Found := False;
-            for k := 0 to Table1.Columns.Count - 1 do
+            for j := 0 to Table2.Columns.Count - 1 do
             begin
-              if Table1.Columns[k].ColumnName = Col2.ColumnName then
+              Col2 := Table2.Columns[j];
+              Found := False;
+              for k := 0 to Table1.Columns.Count - 1 do
               begin
-                Found := True;
-                Break;
+                if Table1.Columns[k].ColumnName = Col2.ColumnName then
+                begin
+                  Found := True;
+                  Break;
+                end;
               end;
-            end;
-            if not Found then
-            begin
-              FScript.Add('-- Eliminar columna: ' + Tables1[i] + '.'
+              if not Found then
+              begin
+                FScript.Add('-- Eliminar columna: ' + Tables1[i] + '.'
                                                              + Col2.ColumnName);
-              FScript.Add('ALTER TABLE `' + Tables1[i] +
-                          '` DROP COLUMN `' + Col2.ColumnName + '`;');
-              FScript.Add('');
+                FScript.Add('ALTER TABLE `' + Tables1[i] +
+                            '` DROP COLUMN `' + Col2.ColumnName + '`;');
+                FScript.Add('');
+              end;
             end;
           end;
         finally
@@ -699,6 +942,9 @@ begin
         end;
         // Comparar índices de la tabla
         CompareIndexes(FConn1, FConn2, DB1, DB2, Tables1[i]);
+        // Si está --with-data, copiar datos (INSERT IGNORE para no duplicar)
+        if FOptions.WithData then
+          CopyData(DB1, DB2, Tables1[i]);
       end;
     end;
   finally
@@ -748,10 +994,10 @@ begin
     begin
       FScript.Add('DROP PROCEDURE IF EXISTS `' + Procedures[i] + '`;');
       FScript.Add('');
-      FScript.Add('DELIMITER $$');
+      FScript.Add('DELIMITER $');
       FScript.Add('');
       ProcDef := GetProcedureDefinition(FConn1, DB1, Procedures[i]);
-      FScript.Add(ProcDef + ' $$');
+      FScript.Add(ProcDef + ' $');
       FScript.Add('');
       FScript.Add('DELIMITER ;');
       FScript.Add('');
@@ -769,6 +1015,12 @@ begin
   FScript.Add('-- Base Origen: ' + DB1);
   FScript.Add('-- Base Destino: ' + DB2);
   FScript.Add('-- Generado: ' + DateTimeToStr(Now));
+  if FOptions.NoDelete then
+    FScript.Add('-- Modo: NO DELETE (sin eliminaciones)');
+  if FOptions.WithTriggers then
+    FScript.Add('-- Incluye: TRIGGERS');
+  if FOptions.WithData then
+    FScript.Add('-- Incluye: DATOS');
   FScript.Add('-- ========================================');
   FScript.Add('');
   FScript.Add('USE `' + DB2 + '`;');
@@ -778,22 +1030,37 @@ begin
   CompareTables(DB1, DB2);
   CompareViews(DB1, DB2);
   CompareProcedures(DB1, DB2);
+  if FOptions.WithTriggers then
+  begin
+    FScript.Add('DELIMITER $');
+    FScript.Add('');
+    CompareTriggers(DB1, DB2);
+    FScript.Add('DELIMITER ;');
+    FScript.Add('');
+  end;
   FScript.Add('SET FOREIGN_KEY_CHECKS = 1;');
   FScript.Add('');
   Result := FScript.Text;
 end;
+
 // ============================================================================
 // PROGRAMA PRINCIPAL
 // ============================================================================
+
 procedure ShowUsage;
 begin
   Writeln('Uso:');
   Writeln('  DBComparer servidor1:puerto1\database1 usuario1\password1 '+
-          'servidor2:puerto2\database2 usuario2\password2');
+          'servidor2:puerto2\database2 usuario2\password2 [opciones]');
+  Writeln('');
+  Writeln('Opciones:');
+  Writeln('  --nodelete       No elimina tablas, columnas ni índices en destino');
+  Writeln('  --with-triggers  Incluye comparación de triggers');
+  Writeln('  --with-data      Copia datos de origen a destino (INSERT)');
   Writeln('');
   Writeln('Ejemplo:');
   Writeln('  DBComparer localhost:3306\midb_prod root\pass123 '+
-          'localhost:3306\midb_dev root\pass456');
+          'localhost:3306\midb_dev root\pass456 --nodelete --with-triggers');
   Writeln('');
   Writeln('El resultado se imprime por la salida estándar. '+
           'Para guardarlo en archivo:');
@@ -836,28 +1103,58 @@ begin
   User := Parts[0];
   Password := Parts[1];
 end;
+
+function ParseOptions: TCompareOptions;
+var
+  i: Integer;
+  Param: string;
+begin
+  Result.NoDelete := False;
+  Result.WithTriggers := False;
+  Result.WithData := False;
+  for i := 5 to ParamCount do
+  begin
+    Param := LowerCase(ParamStr(i));
+    if SameText(Param,'--nodelete') then
+      Result.NoDelete := True
+    else if SameText(Param, '--with-triggers') then
+      Result.WithTriggers := True
+    else if SameText(Param, '--with-data') then
+      Result.WithData := True;
+  end;
+end;
+
 var
   Comparer: TDBComparer;
   Server1, Port1, DB1, User1, Pass1: string;
   Server2, Port2, DB2, User2, Pass2: string;
   Script: string;
+  Options: TCompareOptions;
 begin
   try
-    if ParamCount <> 4 then
+    if ParamCount < 4 then
       ShowUsage;
     // Parsear parámetros
     ParseConnectionString(ParamStr(1), Server1, Port1, DB1);
     ParseCredentials(ParamStr(2), User1, Pass1);
     ParseConnectionString(ParamStr(3), Server2, Port2, DB2);
     ParseCredentials(ParamStr(4), User2, Pass2);
+    Options := ParseOptions;
     Writeln(ErrOutput, 'Conectando a servidores...');
     Writeln(ErrOutput, 'Origen: ' + Server1 + ':' + Port1 + '\' + DB1);
     Writeln(ErrOutput, 'Destino: ' + Server2 + ':' + Port2 + '\' + DB2);
+    if Options.NoDelete then
+      Writeln(ErrOutput, 'Modo: NO DELETE');
+    if Options.WithTriggers then
+      Writeln(ErrOutput, 'Incluye: TRIGGERS');
+    if Options.WithData then
+      Writeln(ErrOutput, 'Incluye: DATOS');
     Writeln(ErrOutput, '');
     // Crear comparador
     Comparer := TDBComparer.Create(
       Server1, User1, Pass1, Port1, DB1,
-      Server2, User2, Pass2, Port2, DB2
+      Server2, User2, Pass2, Port2, DB2,
+      Options
     );
     try
       Writeln(ErrOutput, 'Generando script de comparación...');
