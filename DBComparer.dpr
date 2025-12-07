@@ -1,4 +1,4 @@
-﻿program DBComparerConsole;
+program DBComparerConsole;
 
 {$APPTYPE CONSOLE}
 uses
@@ -280,6 +280,8 @@ function TDBComparer.GetViewDefinition(Conn: TUniConnection;
 var
   Query: TUniQuery;
   OldDB: string;
+  ViewDef: string;
+  PosDefiner, PosSQL: Integer;
 begin
   Query := TUniQuery.Create(nil);
   try
@@ -288,7 +290,23 @@ begin
     Conn.Database := DBName;
     Query.SQL.Text := 'SHOW CREATE VIEW `' + ViewName + '`';
     Query.Open;
-    Result := Query.Fields[1].AsString;
+    ViewDef := Query.Fields[1].AsString;
+
+    // Eliminar la cláusula DEFINER
+    PosDefiner := Pos('DEFINER=', UpperCase(ViewDef));
+    if PosDefiner > 0 then
+    begin
+      // Buscar el siguiente espacio o la palabra SQL después del DEFINER
+      PosSQL := PosEx('SQL', UpperCase(ViewDef), PosDefiner);
+      if PosSQL > 0 then
+      begin
+        // Eliminar desde DEFINER hasta justo antes de SQL SECURITY
+        ViewDef := Copy(ViewDef, 1, PosDefiner - 1) +
+                   Copy(ViewDef, PosSQL, Length(ViewDef));
+      end;
+    end;
+
+    Result := Trim(ViewDef);
     Conn.Database := OldDB;
   finally
     Query.Free;
@@ -325,6 +343,8 @@ function TDBComparer.GetProcedureDefinition(Conn: TUniConnection;
 var
   Query: TUniQuery;
   OldDB: string;
+  ProcDef: string;
+  PosDefiner, PosProcedure: Integer;
 begin
   Query := TUniQuery.Create(nil);
   try
@@ -333,7 +353,23 @@ begin
     Conn.Database := DBName;
     Query.SQL.Text := 'SHOW CREATE PROCEDURE `' + ProcName + '`';
     Query.Open;
-    Result := Query.Fields[2].AsString;
+    ProcDef := Query.Fields[2].AsString;
+
+    // Eliminar la cláusula DEFINER
+    PosDefiner := Pos('DEFINER=', UpperCase(ProcDef));
+    if PosDefiner > 0 then
+    begin
+      // Buscar la palabra PROCEDURE después del DEFINER
+      PosProcedure := PosEx('PROCEDURE', UpperCase(ProcDef), PosDefiner);
+      if PosProcedure > 0 then
+      begin
+        // Eliminar desde DEFINER hasta justo antes de PROCEDURE
+        ProcDef := Copy(ProcDef, 1, PosDefiner - 1) +
+                   Copy(ProcDef, PosProcedure, Length(ProcDef));
+      end;
+    end;
+
+    Result := Trim(ProcDef);
     Conn.Database := OldDB;
   finally
     Query.Free;
@@ -370,13 +406,11 @@ function TDBComparer.ColumnsAreEqual(const Col1, Col2: TColumnInfo): Boolean;
     // (ej: 'int unsigned' -> 'intunsigned')
     Result := StringReplace(S, ' ', '', [rfReplaceAll]);
   end;
-
   // FUNCIÓN AUXILIAR PARA NORMALIZAR EXTRA
   function NormalizeExtra(const AExtra: string): string;
   begin
     Result := LowerCase(Trim(AExtra));
   end;
-
 var
   Typ1, Typ2: string;
   Null1, Null2, Key1, Key2, Extra1, Extra2, Def1, Def2: string;
