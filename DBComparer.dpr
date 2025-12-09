@@ -440,25 +440,27 @@ begin
   PosDefiner := Pos('DEFINER=', UpperSQL);
   if PosDefiner > 0 then
   begin
-    // CORRECCIÓN: Buscar primero el tipo de objeto específico
-    // para evitar falsos positivos con palabras como "SQLEXCEPTION"
-    // 1. Intentar encontrar PROCEDURE
-    PosEnd := PosEx('PROCEDURE', UpperSQL, PosDefiner);
-    // 2. Si no, intentar encontrar TRIGGER
-    if PosEnd = 0 then
-      PosEnd := PosEx('TRIGGER', UpperSQL, PosDefiner);
-    // 3. Si no, intentar encontrar FUNCTION
-    if PosEnd = 0 then
-      PosEnd := PosEx('FUNCTION', UpperSQL, PosDefiner);
-    // 4. Si no, intentar encontrar SQL (común en Vistas: SQL SECURITY...)
-    if PosEnd = 0 then
-      PosEnd := PosEx('SQL', UpperSQL, PosDefiner);
-    // 5. Último recurso: buscar VIEW
-    if PosEnd = 0 then
-      PosEnd := PosEx('VIEW', UpperSQL, PosDefiner);
+    PosEnd := 0;
+    // 1. Buscar PROCEDURE (Prioridad alta para evitar error
+    //    con SQLEXCEPTION en el cuerpo)
+    if PosEnd = 0 then PosEnd := PosEx('PROCEDURE', UpperSQL, PosDefiner);
+    // 2. Buscar TRIGGER
+    if PosEnd = 0 then PosEnd := PosEx('TRIGGER', UpperSQL, PosDefiner);
+    // 3. Buscar FUNCTION
+    if PosEnd = 0 then PosEnd := PosEx('FUNCTION', UpperSQL, PosDefiner);
+    // 4. Buscar VIEW (Esto limpiará también el
+    //    'SQL SECURITY' si está antes del VIEW)
+    if PosEnd = 0 then PosEnd := PosEx('VIEW', UpperSQL, PosDefiner);
+    // NOTA: Hemos eliminado la búsqueda genérica de 'SQL' porque causaba
+    // falsos positivos con variables o handlers como 'SQLEXCEPTION'.
     if PosEnd > 0 then
-      Result := Trim(Copy(Result, 1, PosDefiner - 1) +
+    begin
+      // Cortamos desde el inicio del DEFINER hasta justo antes del
+      // tipo de objeto Y Agregamos un espacio por seguridad para evitar
+      // concatenaciones tipo "UNDEFINEDVIEW"
+      Result := Trim(Copy(Result, 1, PosDefiner - 1) + ' ' +
                      Copy(Result, PosEnd, Length(Result)));
+    end;
   end;
 end;
 
@@ -923,10 +925,8 @@ begin
   try
     Query1.Connection := FConn1;
     Query2.Connection := FConn2;
-
     // Obtener columnas de clave primaria
     PKColumns := GetPrimaryKeyColumns(FConn1, DB1, TableName);
-
     if PKColumns.Count = 0 then
     begin
       FScript.Add('-- ADVERTENCIA: Tabla ' + TableName +
@@ -1021,7 +1021,6 @@ begin
         for i := 0 to CommonFields.Count - 1 do
         begin
           FieldName := CommonFields[i];
-
           // Saltar campos de clave primaria
           if PKColumns.IndexOf(FieldName) >= 0 then
             Continue;
@@ -1100,7 +1099,6 @@ begin
     Values.Free;
   end;
 end;
-
 // NUEVA FUNCIÓN: BuildUpdateStatement que solo usa campos comunes
 function TDBComparer.BuildUpdateStatementCommon(const TableName: string;
                                           const PKColumns: TStringList;
@@ -1218,11 +1216,13 @@ end;
 procedure TDBComparer.CompareTables(const DB1, DB2: string);
 var
   Tables1, Tables2: TStringList;
+  PKList: TStringList; // Para recolectar columnas PK
   i, j, k: Integer;
   Table1, Table2: TTableInfo;
   Found: Boolean;
   Col1, Col2: TColumnInfo;
-  IsExcluded: Boolean;  // NUEVA
+  Indexes: TArray<TIndexInfo>;
+  Idx: TIndexInfo;
 begin
   Tables1 := GetTables(FConn1, DB1);
   Tables2 := GetTables(FConn2, DB2);
@@ -1231,7 +1231,8 @@ begin
     FScript.Add('-- COMPARACIÓN DE TABLAS');
     FScript.Add('-- ========================================');
     FScript.Add('');
-    // Tablas eliminadas (solo si NO está --nodelete)
+
+    // 1. Tablas eliminadas (solo si NO está --nodelete)
     if not FOptions.NoDelete then
     begin
       for i := 0 to Tables2.Count - 1 do
@@ -1244,39 +1245,80 @@ begin
         end;
       end;
     end;
+
+    // 2. Iterar tablas de origen
     for i := 0 to Tables1.Count - 1 do
     begin
-      // NUEVA: Verificar si la tabla está excluida de sincronización de datos
-      IsExcluded := (FOptions.ExcludeTables <> nil) and
-                    (FOptions.ExcludeTables.IndexOf(Tables1[i]) >= 0);
-
       if Tables2.IndexOf(Tables1[i]) = -1 then
       begin
-        // Tabla nueva
+        // ============================================================
+        // CASO A: TABLA NUEVA (CREATE TABLE COMPLETO)
+        // ============================================================
         FScript.Add('-- Tabla nueva: ' + Tables1[i]);
         Table1 := GetTableStructure(FConn1, DB1, Tables1[i]);
+        PKList := TStringList.Create;
         try
           FScript.Add('CREATE TABLE `' + Tables1[i] + '` (');
+
+          // Generar definiciones de columnas
           for j := 0 to Table1.Columns.Count - 1 do
           begin
             Col1 := Table1.Columns[j];
+
+            // Detectar si es parte de la Primary Key
+            if Col1.ColumnKey = 'PRI' then
+              PKList.Add('`' + Col1.ColumnName + '`');
+
+            // Escribir definición de columna
+            // Nota: Si no es la última columna, ponemos coma.
+            // PERO, si es la última columna y HAY Primary Key pendiente, también necesitamos coma.
             if j < Table1.Columns.Count - 1 then
               FScript.Add('  ' + GenerateColumnDefinition(Col1) + ',')
             else
-              FScript.Add('  ' + GenerateColumnDefinition(Col1));
+            begin
+              // Es la última columna
+              if PKList.Count > 0 then
+                FScript.Add('  ' + GenerateColumnDefinition(Col1) + ',')
+              else
+                FScript.Add('  ' + GenerateColumnDefinition(Col1));
+            end;
           end;
+
+          // Definir PRIMARY KEY inline (Obligatorio para AUTO_INCREMENT)
+          if PKList.Count > 0 then
+          begin
+            FScript.Add('  PRIMARY KEY (' + PKList.CommaText + ')');
+          end;
+
           FScript.Add(');');
           FScript.Add('');
+
+          // Agregar Índices Secundarios (NO Primary, esos ya están)
+          Indexes := GetTableIndexes(FConn1, DB1, Tables1[i]);
+          for Idx in Indexes do
+          begin
+            if not Idx.IsPrimary then
+            begin
+              FScript.Add('-- Agregar índice secundario: ' + Idx.IndexName);
+              FScript.Add(GenerateIndexDefinition(Tables1[i], Idx) + ';');
+              FScript.Add('');
+            end;
+          end;
+
         finally
           Table1.Free;
+          PKList.Free;
         end;
       end
       else
       begin
-        // Tabla existente - comparar estructura
+        // ============================================================
+        // CASO B: TABLA EXISTENTE (COMPARAR ESTRUCTURA)
+        // ============================================================
         Table1 := GetTableStructure(FConn1, DB1, Tables1[i]);
         Table2 := GetTableStructure(FConn2, DB2, Tables1[i]);
         try
+          // B.1 Buscar columnas nuevas o modificadas
           for j := 0 to Table1.Columns.Count - 1 do
           begin
             Col1 := Table1.Columns[j];
@@ -1289,8 +1331,7 @@ begin
                 Col2 := Table2.Columns[k];
                 if not ColumnsAreEqual(Col1, Col2) then
                 begin
-                  FScript.Add('-- Modificar columna: ' + Tables1[i] + '.'
-                                                             + Col1.ColumnName);
+                  FScript.Add('-- Modificar columna: ' + Tables1[i] + '.' + Col1.ColumnName);
                   FScript.Add('ALTER TABLE `' + Tables1[i] +
                               '` MODIFY COLUMN ' +
                              GenerateColumnDefinition(Col1) + ';');
@@ -1301,15 +1342,14 @@ begin
             end;
             if not Found then
             begin
-              FScript.Add('-- Agregar columna: ' + Tables1[i] + '.'
-                                                             + Col1.ColumnName);
+              FScript.Add('-- Agregar columna: ' + Tables1[i] + '.' + Col1.ColumnName);
               FScript.Add('ALTER TABLE `' + Tables1[i] + '` ADD COLUMN ' +
                          GenerateColumnDefinition(Col1) + ';');
               FScript.Add('');
             end;
           end;
 
-          // Columnas eliminadas (solo si NO está --nodelete)
+          // B.2 Columnas eliminadas (solo si NO está --nodelete)
           if not FOptions.NoDelete then
           begin
             for j := 0 to Table2.Columns.Count - 1 do
@@ -1326,8 +1366,7 @@ begin
               end;
               if not Found then
               begin
-                FScript.Add('-- Eliminar columna: ' + Tables1[i] + '.'
-                                                             + Col2.ColumnName);
+                FScript.Add('-- Eliminar columna: ' + Tables1[i] + '.' + Col2.ColumnName);
                 FScript.Add('ALTER TABLE `' + Tables1[i] +
                             '` DROP COLUMN `' + Col2.ColumnName + '`;');
                 FScript.Add('');
@@ -1338,33 +1377,20 @@ begin
           Table1.Free;
           Table2.Free;
         end;
-        // Comparar índices de la tabla
+
+        // B.3 Comparar índices (Solo para tablas existentes)
         CompareIndexes(FConn1, FConn2, DB1, DB2, Tables1[i]);
-        // MODIFICADO: Verificar exclusión antes de sincronizar datos
-        if FOptions.WithData then
-        begin
-          if IsExcluded then
-          begin
-            FScript.Add('-- NOTA: Tabla ' + Tables1[i] +
-                       ' excluida de sincronización de datos');
-            FScript.Add('');
-          end
-          else
-            CopyData(DB1, DB2, Tables1[i]);
-        end
-        else if FOptions.WithDataDiff then
-        begin
-          if IsExcluded then
-          begin
-            FScript.Add('-- NOTA: Tabla ' + Tables1[i] +
-                       ' excluida de sincronización de datos');
-            FScript.Add('');
-          end
-          else
-            CompareAndSyncData(DB1, DB2, Tables1[i]);
-        end;
       end;
-    end;
+
+      // ============================================================
+      // 3. SINCRONIZACIÓN DE DATOS (Común para nueva y existente)
+      // ============================================================
+      if FOptions.WithData then
+        CopyData(DB1, DB2, Tables1[i])
+      else if FOptions.WithDataDiff then
+        CompareAndSyncData(DB1, DB2, Tables1[i]);
+
+    end; // Fin bucle principal de tablas
   finally
     Tables1.Free;
     Tables2.Free;
