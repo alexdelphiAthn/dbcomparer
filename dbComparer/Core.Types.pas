@@ -2,10 +2,9 @@ unit Core.Types;
 
 interface
 
-uses System.Generics.Collections;
+uses System.Classes, Generics.Collections, system.SysUtils;
 
 type
-
   TColumnInfo = record
     ColumnName: string;
     DataType: string;
@@ -52,3 +51,19 @@ type
     ExcludeTables: TStringList;
     IncludeTables: TStringList;
   end;
+
+implementation
+
+{ TTableInfo }
+constructor TTableInfo.Create;
+begin
+  Columns := TList<TColumnInfo>.Create;
+end;
+
+destructor TTableInfo.Destroy;
+begin
+  Columns.Free;
+  inherited;
+end;
+
+end.
