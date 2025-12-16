@@ -1,0 +1,29 @@
+# Archivos compilados de Delphi
+*.dcu
+*.exe
+*.dll
+*.bpl
+*.dcp
+*.dsk
+*.local
+fzam.res
+*.identcache
+*.tvsconfig
+*.dproj.local
+*.vlb
+*.7z
+.identcache
+__history/
+__recovery/
+Win32/
+Win64/
+.git
+
+# Contraseña de la conexión es distinta en cada punto
+UniDataConn.dfm
+
+# Configuración sensible (MySQL, etc.)
+config.ini
+database.cfg
+*.key
+*.lic
