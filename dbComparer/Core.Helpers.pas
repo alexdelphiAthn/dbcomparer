@@ -32,6 +32,7 @@ type
     function GenerateDropTrigger(const Trigger:string):string; virtual; abstract;
     function GenerateDropView(const View:string):string; virtual; abstract;
     function GenerateDropProcedure(const Proc:string):string; virtual; abstract;
+    function GenerateDropFunction(const FuncName:string):string; virtual; abstract;
     function GenerateDeleteSQL(const TableName, WhereClause: string): string; virtual; abstract;
     function GenerateInsertSQL(const TableName: string; Fields, Values: TStringList): string; virtual; abstract;
     function ValueToSQL(const Field: TField): string; virtual; abstract;

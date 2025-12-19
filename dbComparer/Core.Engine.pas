@@ -19,6 +19,7 @@ type
     procedure CompareViews;
     procedure CompareTriggers;
     procedure CompareProcedures;
+    procedure CompareFunctions;
     procedure CreateNewTable(const TableName: string);
     procedure CompareData(const TableName: string);
     procedure CopyAllData(const TableName: string);
@@ -106,6 +107,7 @@ begin
   CompareTables;
   CompareViews;
   CompareProcedures;
+  CompareFunctions;
   if FOptions.WithTriggers then
     CompareTriggers;
 end;
@@ -540,6 +542,26 @@ begin
     end;
   finally
     SourceProcs.Free;
+  end;
+end;
+
+procedure TDBComparerEngine.CompareFunctions;
+var
+  SourceFuncs: TStringList;
+  i: Integer;
+begin
+  SourceFuncs := FSourceDB.GetFunctions;
+  try
+    FWriter.AddComment('=== FUNCIONES ===');
+    for i := 0 to SourceFuncs.Count - 1 do
+    begin
+      FWriter.AddComment('Recreando función: ' + SourceFuncs[i]);
+      // Borrar y crear
+      FWriter.AddCommand(FHelpers.GenerateDropFunction(SourceFuncs[i]));
+      FWriter.AddCommand(FSourceDB.GetFunctionDefinition(SourceFuncs[i]));
+    end;
+  finally
+    SourceFuncs.Free;
   end;
 end;
 

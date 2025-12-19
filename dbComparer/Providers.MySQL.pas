@@ -26,7 +26,9 @@ type
     function GetViews:TStringList;
     function GetViewDefinition(const ViewName:string):string;
     function GetProcedures:TStringList;
+    function GetFunctions:TStringList;
     function GetProcedureDefinition(const ProcedureName:string):string;
+    function GetFunctionDefinition(const FunctionName:string):string;
     function GetData(const TableName: string; const Filter: string = ''): TDataSet;
   private
     function StripDefiner(const SQL: string): string;
@@ -53,6 +55,50 @@ begin
   Result := Query; // El Engine será responsable de liberarlo
 end;
 
+
+function TMySQLMetadataProvider.GetFunctionDefinition(
+  const FunctionName: string): string;
+var
+  Query: TUniQuery;
+  OldDB: string;
+begin
+  Query := TUniQuery.Create(nil);
+  try
+    Query.Connection := FConn;
+    Query.Connection.Database := FDBName;
+    Query.SQL.Text := 'SHOW CREATE FUNCTION `' + FunctionName + '`';
+    Query.Open;
+    Result := Query.Fields[2].AsString;
+    Result := StripDefiner(Result);
+  finally
+    Query.Free;
+  end;
+end;
+
+function TMySQLMetadataProvider.GetFunctions: TStringList;
+var
+  Query: TUniQuery;
+begin
+  Result := TStringList.Create;
+  Query := TUniQuery.Create(nil);
+  try
+    Query.Connection := FConn;
+    FConn.Database := SCHEMADB;
+    Query.SQL.Text := '   SELECT ROUTINE_NAME '+
+                      '     FROM INFORMATION_SCHEMA.ROUTINES ' +
+                      '    WHERE ROUTINE_SCHEMA = ' + QuotedStr(FDBName) +
+                      '      AND ROUTINE_TYPE = '+ QuotedStr('FUNCTION') +
+                      ' ORDER BY ROUTINE_NAME';
+    Query.Open;
+    while not Query.Eof do
+    begin
+      Result.Add(Query.FieldByName('ROUTINE_NAME').AsString);
+      Query.Next;
+    end;
+  finally
+    Query.Free;
+  end;
+end;
 
 constructor TMySQLMetadataProvider.Create(Conn: TUniConnection;
   const DBName: string);
@@ -98,10 +144,11 @@ begin
   try
     Query.Connection := FConn;
     FConn.Database := SCHEMADB;
-    Query.SQL.Text := 'SELECT ROUTINE_NAME '+
-                      '  FROM INFORMATION_SCHEMA.ROUTINES ' +
-                      ' WHERE ROUTINE_SCHEMA = ' + QuotedStr(FDBName) + ' ' +
-                      'ORDER BY ROUTINE_NAME';
+    Query.SQL.Text := '   SELECT ROUTINE_NAME '+
+                      '     FROM INFORMATION_SCHEMA.ROUTINES ' +
+                      '    WHERE ROUTINE_SCHEMA = ' + QuotedStr(FDBName) +
+                      '      AND ROUTINE_TYPE = '+ QuotedStr('PROCEDURE') +
+                      ' ORDER BY ROUTINE_NAME';
     Query.Open;
     while not Query.Eof do
     begin

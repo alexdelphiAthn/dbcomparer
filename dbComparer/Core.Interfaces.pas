@@ -18,6 +18,8 @@ type
     function GetViewDefinition(const ViewName:string):string;
     function GetProcedures:TStringList;
     function GetProcedureDefinition(const ProcedureName:string):string;
+    function GetFunctions:TStringList;
+    function GetFunctionDefinition(const FunctionName:string):string;
   end;
 
   // Contrato para escribir el script
@@ -49,7 +51,8 @@ type
     function GenerateDropIndexSQL(const TableName, IndexName:string): string;
     function GenerateDropTrigger(const Trigger:string):string;
     function GenerateDropProcedure(const Proc:string):string;
-        function GenerateDropView(const View:string):string;
+    function GenerateDropFunction(const FuncName: string): string;
+    function GenerateDropView(const View:string):string;
     function GenerateDropTableSQL(const TableName:String): string;
     function GenerateInsertSQL(const TableName: string;
                                Fields, Values: TStringList): string;

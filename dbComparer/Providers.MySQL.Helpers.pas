@@ -26,6 +26,7 @@ type
     function GenerateDropTableSQL(const TableName:String): string; override;
     function GenerateDropTrigger(const Trigger:string):string; override;
     function GenerateDropProcedure(const Proc:string):string; override;
+    function GenerateDropFunction(const FuncName: string): string; override;
     function GenerateDropView(const View:string):string; override;
     function ValueToSQL(const Field: TField): string;
     function GenerateDeleteSQL(const TableName, WhereClause: string): string; override;
@@ -214,6 +215,11 @@ function TMySQLHelpers.GenerateDropColumnSQL(const TableName,
 begin
   Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
             ' DROP COLUMN ' + QuoteIdentifier(ColumnName);
+end;
+
+function TMySQLHelpers.GenerateDropFunction(const FuncName: string): string;
+begin
+  Result:= 'DROP FUNCTION IF EXISTS ' + QuoteIdentifier(FuncName);
 end;
 
 function TMySQLHelpers.GenerateDropTableSQL(const TableName:String): string;
