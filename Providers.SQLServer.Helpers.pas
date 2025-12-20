@@ -33,8 +33,8 @@ type
     function GenerateCreateFunctionSQL(const Body: string): string; override;
     function GenerateDeleteSQL(const TableName, WhereClause: string): string; override;
     function GenerateInsertSQL(const TableName: string;
-                           Fields, Values: TStringList;
-                           const HasIdentity: Boolean = False): string; override;// Nuevo parámetro
+                               Fields, Values: TStringList;
+                               const HasIdentity: Boolean = False): string; override;
   end;
 
 implementation
@@ -74,7 +74,7 @@ end;
 
 function TSQLServerHelpers.GenerateInsertSQL(const TableName: string;
                            Fields, Values: TStringList;
-                           const HasIdentity: Boolean = False): string; // Nuevo parámetro
+                           const HasIdentity: Boolean = False): string;
 var
   i: Integer;
   FieldList, ValueList: string;
