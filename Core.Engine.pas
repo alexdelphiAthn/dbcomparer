@@ -8,8 +8,8 @@ uses Core.Interfaces, Core.Types, System.Classes, Core.Helpers,
 type
   TDBComparerEngine = class
   private
-    FSourceDB: IDBMetadataProvider; // Interfaz, no objeto concreto
-    FTargetDB: IDBMetadataProvider; // Interfaz
+    FSourceDB: IDBMetadataProvider;
+    FTargetDB: IDBMetadataProvider; 
     FWriter: IScriptWriter;
     FOptions: TComparerOptions;
     FHelpers: IDBHelpers;
@@ -20,6 +20,7 @@ type
     procedure CompareTriggers;
     procedure CompareProcedures;
     procedure CompareFunctions;
+    procedure CompareSequences;
     procedure CreateNewTable(const TableName: string);
     procedure CompareData(const TableName: string);
     procedure CopyAllData(const TableName: string);
@@ -47,6 +48,49 @@ begin
   FWriter := Writer;
   FOptions := Options;
   FHelpers := Helpers;
+end;
+
+procedure TDBComparerEngine.CompareSequences;
+var
+  SourceSeqs, TargetSeqs: TStringList;
+  i: Integer;
+begin
+  // Obtenemos listas de ambos lados
+  SourceSeqs := FSourceDB.GetSequences;
+  TargetSeqs := FTargetDB.GetSequences; 
+  try
+    // Normalizamos para comparaciones (opcional, pero recomendado)
+    SourceSeqs.CaseSensitive := False;
+    TargetSeqs.CaseSensitive := False;
+    if (SourceSeqs.Count > 0) or ((TargetSeqs.Count > 0) and not FOptions.NoDelete) then
+      FWriter.AddComment('=== SECUENCIAS / GENERADORES ===');
+    // 1. CREAR: Existe en Origen, pero NO en Destino
+    for i := 0 to SourceSeqs.Count - 1 do
+    begin
+      if TargetSeqs.IndexOf(SourceSeqs[i]) = -1 then
+      begin
+        FWriter.AddComment('Crear secuencia faltante: ' + SourceSeqs[i]);
+        FWriter.AddCommand(FHelpers.GenerateCreateSequence(SourceSeqs[i]));
+      end;
+      // NOTA: Si ya existe, NO la tocamos. 
+      // Recrearla reiniciaría el contador a 1, lo cual es peligroso en producción.
+    end;
+    // 2. BORRAR: Existe en Destino, pero NO en Origen (si --nodelete no está activo)
+    if not FOptions.NoDelete then
+    begin
+      for i := 0 to TargetSeqs.Count - 1 do
+      begin
+        if SourceSeqs.IndexOf(TargetSeqs[i]) = -1 then
+        begin
+          FWriter.AddComment('Eliminar secuencia obsoleta: ' + TargetSeqs[i]);
+          FWriter.AddCommand(FHelpers.GenerateDropSequence(TargetSeqs[i]));
+        end;
+      end;
+    end;
+  finally
+    SourceSeqs.Free;
+    TargetSeqs.Free;
+  end;
 end;
 
 procedure TDBComparerEngine.CreateNewTable(const TableName: string);

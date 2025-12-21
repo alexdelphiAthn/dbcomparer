@@ -20,6 +20,7 @@ type
     function GetProcedureDefinition(const ProcedureName:string):string;
     function GetFunctions:TStringList;
     function GetFunctionDefinition(const FunctionName:string):string;
+    function GetSequences: TStringList;
   end;
 
   // Contrato para escribir el script
@@ -66,6 +67,8 @@ type
     function NormalizeExtra(const AExtra: string): string;
     function GenerateCreateProcedureSQL(const Body: string): string;
     function GenerateCreateFunctionSQL(const Body: string): string;
+    function GenerateCreateSequence(const SeqName: string): string;
+    function GenerateDropSequence(const SeqName: string): string;   
   end;
 
 implementation

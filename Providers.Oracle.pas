@@ -26,6 +26,7 @@ type
     function GetViewDefinition(const ViewName: string): string;
     function GetProcedures: TStringList;
     function GetFunctions: TStringList;
+    function GetSequences: TStringList;
     function GetProcedureDefinition(const ProcedureName: string): string;
     function GetFunctionDefinition(const FunctionName: string): string;
     function GetData(const TableName: string; const Filter: string = ''): TDataSet;
@@ -36,6 +37,30 @@ type
 implementation
 
 { TOracleMetadataProvider }
+
+function TOracleMetadataProvider.GetSequences: TStringList;
+var
+  Query: TUniQuery;
+begin
+  Result := TStringList.Create;
+  Query := TUniQuery.Create(nil);
+  try
+    Query.Connection := FConn;
+    Query.SQL.Text := 
+      'SELECT SEQUENCE_NAME ' +
+      '  FROM ALL_SEQUENCES ' +
+      ' WHERE SEQUENCE_OWNER = ' + QuotedStr(FOwner) +
+      ' ORDER BY SEQUENCE_NAME';
+    Query.Open;
+    while not Query.Eof do
+    begin
+      Result.Add(Query.FieldByName('SEQUENCE_NAME').AsString);
+      Query.Next;
+    end;
+  finally
+    Query.Free;
+  end;
+end;
 
 function TOracleMetadataProvider.QuoteIdentifier(const Identifier: string): string;
 begin

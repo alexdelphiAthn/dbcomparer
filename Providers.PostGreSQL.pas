@@ -1,4 +1,4 @@
-unit Providers.PostgreSQL;
+﻿unit Providers.PostgreSQL;
 
 interface
 
@@ -26,6 +26,7 @@ type
     function GetViewDefinition(const ViewName: string): string;
     function GetProcedures: TStringList;
     function GetFunctions: TStringList;
+    function GetSequences:TStringList;
     function GetProcedureDefinition(const ProcedureName: string): string;
     function GetFunctionDefinition(const FunctionName: string): string;
     function GetData(const TableName: string; const Filter: string = ''): TDataSet;
@@ -167,6 +168,33 @@ begin
     while not Query.Eof do
     begin
       Result.Add(Query.FieldByName('procedure_name').AsString);
+      Query.Next;
+    end;
+  finally
+    Query.Free;
+  end;
+end;
+
+function TPostgreSQLMetadataProvider.GetSequences: TStringList;
+var
+  Query: TUniQuery;
+begin
+  Result := TStringList.Create;
+  Query := TUniQuery.Create(nil);
+  try
+    Query.Connection := FConn;
+    // Consultamos pg_class filtrando por relkind = 'S' (Sequence)
+    Query.SQL.Text :=
+      'SELECT c.relname AS sequence_name ' +
+      '  FROM pg_class c ' +
+      ' INNER JOIN pg_namespace n ON n.oid = c.relnamespace ' +
+      ' WHERE n.nspname = ' + QuotedStr(FSchema) +
+      '   AND c.relkind = ''S'' ' +
+      'ORDER BY c.relname';
+    Query.Open;
+    while not Query.Eof do
+    begin
+      Result.Add(Query.FieldByName('sequence_name').AsString);
       Query.Next;
     end;
   finally

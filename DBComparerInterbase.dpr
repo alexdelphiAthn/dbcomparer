@@ -1,4 +1,4 @@
-program DBComparerInterBase;
+﻿program DBComparerInterBase;
 {$APPTYPE CONSOLE}
 uses
   Uni,

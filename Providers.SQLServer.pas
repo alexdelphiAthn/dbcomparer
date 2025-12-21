@@ -25,6 +25,7 @@ type
     function GetViewDefinition(const ViewName: string): string;
     function GetProcedures: TStringList;
     function GetFunctions: TStringList;
+    function GetSequences:TStringList;
     function GetProcedureDefinition(const ProcedureName: string): string;
     function GetFunctionDefinition(const FunctionName: string): string;
     function GetData(const TableName: string; const Filter: string = ''): TDataSet;
@@ -35,6 +36,12 @@ type
 implementation
 
 { TSQLServerMetadataProvider }
+
+function TSQLServerMetadataProvider.GetSequences: TStringList;
+begin
+  // SQL Server no tiene secuencias independientes, devolvemos lista vacía.
+  Result := TStringList.Create; 
+end;
 
 function TSQLServerMetadataProvider.QuoteIdentifier(const Identifier: string): string;
 begin

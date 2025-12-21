@@ -1,4 +1,4 @@
-program DBComparerOracle;
+﻿program DBComparerOracle;
 {$APPTYPE CONSOLE}
 uses
   Uni,
@@ -9,7 +9,8 @@ uses
   Providers.Oracle in 'Providers.Oracle.pas',
   ScriptWriters in 'ScriptWriters.pas',
   Providers.Oracle.Helpers in 'Providers.Oracle.Helpers.pas',
-  System.SysUtils;
+  System.SysUtils,
+  system.StrUtils;
 
 procedure ShowUsage;
 begin

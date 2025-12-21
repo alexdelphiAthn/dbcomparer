@@ -27,6 +27,7 @@ type
     function GetViewDefinition(const ViewName: string): string;
     function GetProcedures: TStringList;
     function GetFunctions: TStringList;
+    function GetSequences: TStringList;
     function GetProcedureDefinition(const ProcedureName: string): string;
     function GetFunctionDefinition(const FunctionName: string): string;
     function GetData(const TableName: string; const Filter: string = ''): TDataSet;
@@ -37,6 +38,28 @@ type
 implementation
 
 { TInterBaseMetadataProvider }
+
+function TInterBaseMetadataProvider.GetSequences: TStringList;
+var
+  Query: TUniQuery;
+begin
+  Result := TStringList.Create;
+  Query := TUniQuery.Create(nil);
+  try
+    Query.Connection := FConn;
+    // RDB$GENERATORS contiene las secuencias
+    Query.SQL.Text := 'SELECT RDB$GENERATOR_NAME FROM RDB$GENERATORS ' +
+                      'WHERE RDB$SYSTEM_FLAG IS NULL OR RDB$SYSTEM_FLAG = 0';
+    Query.Open;
+    while not Query.Eof do
+    begin
+      Result.Add(Trim(Query.Fields[0].AsString));
+      Query.Next;
+    end;
+  finally
+    Query.Free;
+  end;
+end;
 
 function TInterBaseMetadataProvider.QuoteIdentifier(const Identifier: string): string;
 begin

@@ -1,4 +1,4 @@
-unit Providers.Oracle.Helpers;
+﻿unit Providers.Oracle.Helpers;
 
 interface
 uses Core.Helpers, Core.Types, System.SysUtils, System.StrUtils,
@@ -33,9 +33,10 @@ type
     function GenerateCreateFunctionSQL(const Body: string): string; override;
     function GenerateDeleteSQL(const TableName, WhereClause: string): string; override;
     function GenerateInsertSQL(const TableName: string; Fields,
-                                                        Values: TStringList): string; override;
-    function GenerateCreateSequenceSQL(const SequenceName: string): string;
-    function GenerateDropSequenceSQL(const SequenceName: string): string;
+                                                        Values: TStringList;
+                               const HasIdentity: Boolean = False): string; override;
+    function GenerateCreateSequence(const SequenceName: string): string; override;
+    function GenerateDropSequence(const SequenceName: string): string; override;
   end;
 
 implementation
@@ -75,7 +76,7 @@ begin
 end;
 
 function TOracleHelpers.GenerateInsertSQL(const TableName: string;
-  Fields, Values: TStringList): string;
+  Fields, Values: TStringList; const HasIdentity: Boolean = False): string;
 var
   i: Integer;
   FieldList, ValueList: string;
@@ -325,13 +326,13 @@ begin
             ' MODIFY ' + GenerateColumnDefinition(ColumnInfo) + ';';
 end;
 
-function TOracleHelpers.GenerateCreateSequenceSQL(const SequenceName: string): string;
+function TOracleHelpers.GenerateCreateSequence(const SequenceName: string): string;
 begin
   Result := 'CREATE SEQUENCE ' + QuoteIdentifier(SequenceName) + 
-            ' START WITH 1 INCREMENT BY 1;';
+            ' START WITH 1 INCREMENT BY 1 NOCACHE;';
 end;
 
-function TOracleHelpers.GenerateDropSequenceSQL(const SequenceName: string): string;
+function TOracleHelpers.GenerateDropSequence(const SequenceName: string): string;
 begin
   Result := 'DROP SEQUENCE ' + QuoteIdentifier(SequenceName) + ';';
 end;

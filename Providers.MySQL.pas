@@ -27,6 +27,7 @@ type
     function GetViewDefinition(const ViewName:string):string;
     function GetProcedures:TStringList;
     function GetFunctions:TStringList;
+    function GetSequences:TSTringList;
     function GetProcedureDefinition(const ProcedureName:string):string;
     function GetFunctionDefinition(const FunctionName:string):string;
     function GetData(const TableName: string; const Filter: string = ''): TDataSet;
@@ -37,6 +38,12 @@ type
 implementation
 
 { TMySQLMetadataProvider }
+
+function TMySQLMetadataProvider.GetSequences: TStringList;
+begin
+  // MySQL no tiene secuencias independientes, devolvemos lista vacía.
+  Result := TStringList.Create; 
+end;
 
 function TMySQLMetadataProvider.GetData(const TableName: string; const Filter: string = ''): TDataSet;
 var

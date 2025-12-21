@@ -1,4 +1,4 @@
-unit Providers.InterBase.Helpers;
+﻿unit Providers.InterBase.Helpers;
 
 interface
 uses Core.Helpers, Core.Types, System.SysUtils, System.StrUtils,
@@ -33,9 +33,10 @@ type
     function GenerateCreateFunctionSQL(const Body: string): string; override;
     function GenerateDeleteSQL(const TableName, WhereClause: string): string; override;
     function GenerateInsertSQL(const TableName: string; Fields,
-                                                        Values: TStringList): string; override;
-    function GenerateCreateGeneratorSQL(const GeneratorName: string): string;
-    function GenerateDropGeneratorSQL(const GeneratorName: string): string;
+                                                        Values: TStringList;
+                               const HasIdentity: Boolean = False): string; override;
+    function GenerateCreateSequence(const GeneratorName: string): string;
+    function GenerateDropSequence(const GeneratorName: string): string;
   end;
 
 implementation
@@ -73,7 +74,7 @@ begin
 end;
 
 function TInterBaseHelpers.GenerateInsertSQL(const TableName: string;
-  Fields, Values: TStringList): string;
+  Fields, Values: TStringList; const HasIdentity: Boolean = False): string;
 var
   i: Integer;
   FieldList, ValueList: string;
@@ -327,12 +328,12 @@ begin
               'AND RDB$RELATION_NAME = ''' + UpperCase(TableName) + ''';';
 end;
 
-function TInterBaseHelpers.GenerateCreateGeneratorSQL(const GeneratorName: string): string;
+function TInterBaseHelpers.GenerateCreateSequence(const GeneratorName: string): string;
 begin
   Result := 'CREATE GENERATOR ' + QuoteIdentifier(GeneratorName) + ';';
 end;
 
-function TInterBaseHelpers.GenerateDropGeneratorSQL(const GeneratorName: string): string;
+function TInterBaseHelpers.GenerateDropSequence(const GeneratorName: string): string;
 begin
   Result := 'DROP GENERATOR ' + QuoteIdentifier(GeneratorName) + ';';
 end;

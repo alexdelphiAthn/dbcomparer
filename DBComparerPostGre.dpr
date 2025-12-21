@@ -1,4 +1,4 @@
-program DBComparerPostgreSQL;
+﻿program DBComparerPostgreSQL;
 
 {$APPTYPE CONSOLE}
 

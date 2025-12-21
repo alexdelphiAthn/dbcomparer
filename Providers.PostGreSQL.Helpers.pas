@@ -1,4 +1,4 @@
-unit Providers.PostgreSQL.Helpers;
+﻿unit Providers.PostgreSQL.Helpers;
 
 interface
 uses Core.Helpers, Core.Types, System.SysUtils, System.StrUtils,
@@ -33,10 +33,26 @@ type
     function GenerateCreateFunctionSQL(const Body: string): string; override;
     function GenerateDeleteSQL(const TableName, WhereClause: string): string; override;
     function GenerateInsertSQL(const TableName: string; Fields,
-                                                        Values: TStringList): string; override;
+                                                        Values: TStringList;
+                               const HasIdentity: Boolean = False): string; override;
+    function GenerateCreateSequence(const SequenceName: string): string; override;
+    function GenerateDropSequence(const SequenceName: string): string; override;
   end;
 
 implementation
+
+function TPostgreSQLHelpers.GenerateCreateSequence(const SequenceName: string): string;
+begin
+  // Generación simple.
+  // Nota: Si la secuencia viene de un SERIAL, Postgres la crea automáticamente
+  // al crear la tabla. El Core.Engine detectará que ya existe y no ejecutará esto.
+  Result := 'CREATE SEQUENCE ' + QuoteIdentifier(SequenceName) + ';';
+end;
+
+function TPostgreSQLHelpers.GenerateDropSequence(const SequenceName: string): string;
+begin
+  Result := 'DROP SEQUENCE IF EXISTS ' + QuoteIdentifier(SequenceName) + ' CASCADE;';
+end;
 
 function TPostgreSQLHelpers.ValueToSQL(const Field: TField): string;
   function BytesToHex(const Bytes: TBytes): string;
@@ -70,7 +86,7 @@ begin
 end;
 
 function TPostgreSQLHelpers.GenerateInsertSQL(const TableName: string;
-  Fields, Values: TStringList): string;
+  Fields, Values: TStringList; const HasIdentity: Boolean = False): string;
 var
   i: Integer;
   FieldList, ValueList: string;

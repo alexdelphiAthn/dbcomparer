@@ -40,6 +40,8 @@ type
     function ValueToSQL(const Field: TField): string; virtual; abstract;
     function GenerateCreateProcedureSQL(const Body: string): string; virtual; abstract;
     function GenerateCreateFunctionSQL(const Body: string): string; virtual; abstract;
+    function GenerateCreateSequence(const SeqName: string): string; virtual; abstract;
+    function GenerateDropSequence(const SeqName: string): string; virtual; abstract;
   end;
 implementation
 
