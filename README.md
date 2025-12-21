@@ -2,13 +2,13 @@
 
 <div align="center">
 
-**Herramienta profesional de sincronización de bases de datos heterogéneas**
+**Herramienta profesional de sincronización de bases de datos**
 
 [![Delphi](https://img.shields.io/badge/Delphi-10.4%2B-red?style=flat-square&logo=delphi)](https://www.embarcadero.com/products/delphi)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 [![UniDAC](https://img.shields.io/badge/Devart-UniDAC-green?style=flat-square)](https://www.devart.com/unidac/)
 
-*Compara, sincroniza y migra esquemas y datos entre diferentes motores de bases de datos con un solo comando.*
+*Compara, sincroniza y migra esquemas y datos entre dos bases de datos de un mismo motor con un solo comando.*
 
 [Características](#-características) • [Instalación](#-compilación) • [Uso](#-uso-rápido) • [Ejemplos](#-ejemplos-por-motor) • [Licencia](#-licencia)
 
