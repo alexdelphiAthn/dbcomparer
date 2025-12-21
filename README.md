@@ -113,7 +113,7 @@ Este proyecto utiliza **[Devart UniDAC](https://www.devart.com/unidac/)** para c
 
 1. **Clona el repositorio:**
    ```bash
-   git clone https://github.com/tuusuario/DBComparer.git
+   git clone https://github.com/alexdelphiAthn/DBComparer.git
    cd DBComparer
    ```
 
@@ -141,23 +141,24 @@ Este proyecto utiliza **[Devart UniDAC](https://www.devart.com/unidac/)** para c
 ### Sintaxis General
 
 ```bash
-Ejecutable.exe <Origen> <Destino> [Opciones]
+#Se genera el script en la salida estándard, con lo cual hay que redirigirlo con >
+Ejecutable.exe <Origen> <Destino> [Opciones] > archivo_script
 ```
 
 ### Formato de Conexión
 
 ```
-servidor:puerto\base_datos usuario\password
+servidor:puerto\base_datos usuario\password 
 ```
 
 ### Ejemplo Básico
 
 ```bash
 # Sincronizar solo estructura
-DBComparer.exe localhost:3306\produccion root\pass localhost:3306\desarrollo root\pass
+DBComparer.exe localhost:3306\produccion root\pass localhost:3306\desarrollo root\pass > script_only_estructure.sql
 
 # Sincronizar estructura + datos
-DBComparer.exe localhost:3306\produccion root\pass localhost:3306\desarrollo root\pass --with-data-diff
+DBComparer.exe localhost:3306\produccion root\pass localhost:3306\desarrollo root\pass --with-data-diff > script_data_structure.sql
 ```
 
 ---
@@ -168,56 +169,56 @@ DBComparer.exe localhost:3306\produccion root\pass localhost:3306\desarrollo roo
 
 ```bash
 # Sincronización completa con datos
-DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --with-data-diff
+DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --with-data-diff > script_incremental.sql
 
 # Solo tablas específicas
-DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --include-tables=usuarios,productos
+DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --include-tables=usuarios,productos > script_withproducts.sql
 
 # Excluir tablas de logs
-DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --exclude-tables=logs,auditoria
+DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --exclude-tables=logs,auditoria > script_withnolog.sql
 ```
 
 ### 🐘 PostgreSQL
 
 ```bash
 # Formato: servidor:puerto\base\esquema
-DBComparerPostGre.exe localhost:5432\ventas\public postgres\pass localhost:5432\ventas\test postgres\pass
+DBComparerPostGre.exe localhost:5432\ventas\public postgres\pass localhost:5432\ventas\test postgres\pass > script.sql
 
 # Esquema personalizado
-DBComparerPostGre.exe prod-server:5432\erp\contabilidad admin\pass dev-server:5432\erp\contabilidad admin\pass
+DBComparerPostGre.exe prod-server:5432\erp\contabilidad admin\pass dev-server:5432\erp\contabilidad admin\pass > script_schem.sql
 ```
 
 ### 🔴 Oracle Database
 
 ```bash
 # Conexión directa: host:port/SID user/pass@Owner
-DBComparerOracle.exe 192.168.1.10:1521/ORCL system/pass@HR 192.168.1.20:1521/ORCL system/pass@HR_TEST
+DBComparerOracle.exe 192.168.1.10:1521/ORCL system/pass@HR 192.168.1.20:1521/ORCL system/pass@HR_TEST > script.sql
 
 # Usando TNS Names
-DBComparerOracle.exe //PROD_DB system/pass //TEST_DB system/pass
+DBComparerOracle.exe //PROD_DB system/pass //TEST_DB system/pass > script_tns.sql
 
 # Con Owner específico
-DBComparerOracle.exe //PROD_DB system/pass@APP_OWNER //TEST_DB system/pass@APP_OWNER
+DBComparerOracle.exe //PROD_DB system/pass@APP_OWNER //TEST_DB system/pass@APP_OWNER > script_owner.sql
 ```
 
 ### 🟦 Microsoft SQL Server
 
 ```bash
 # Modo seguro (sin borrados)
-DBComparerSQLServer.exe sqlserver:1433\Produccion sa\pass sqlserver:1433\Desarrollo sa\pass --nodelete
+DBComparerSQLServer.exe sqlserver:1433\Produccion sa\pass sqlserver:1433\Desarrollo sa\pass --nodelete > script_safe.sql
 
 # Con triggers y datos
-DBComparerSQLServer.exe sqlserver:1433\Produccion sa\pass sqlserver:1433\Desarrollo sa\pass --with-triggers --with-data-diff
+DBComparerSQLServer.exe sqlserver:1433\Produccion sa\pass sqlserver:1433\Desarrollo sa\pass --with-triggers --with-data-diff > script_withdata.sql
 ```
 
 ### 🔥 InterBase / Firebird
 
 ```bash
 # Servidor remoto
-DBComparerInterbase.exe 192.168.1.50:3050\C:\Data\prod.gdb sysdba\masterkey 192.168.1.50:3050\C:\Data\test.gdb sysdba\masterkey
+DBComparerInterbase.exe 192.168.1.50:3050\C:\Data\prod.gdb sysdba\masterkey 192.168.1.50:3050\C:\Data\test.gdb sysdba\masterkey > \\scrips\update_script.sql
 
 # Archivo local (embebido)
-DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:\Data\test.gdb sysdba\masterkey
+DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:\Data\test.gdb sysdba\masterkey > c:\script.sql
 ```
 
 ---
@@ -252,23 +253,23 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 
 ### 1. **Despliegue Dev ➡️ Producción**
 ```bash
-DBComparer.exe dev-server:3306\myapp root\pass prod-server:3306\myapp root\pass --nodelete
+DBComparer.exe dev-server:3306\myapp root\pass prod-server:3306\myapp root\pass --nodelete > script.sql
 ```
 
 ### 2. **Clonar Estructura sin Datos**
 ```bash
-DBComparer.exe source:3306\db user\pass target:3306\db user\pass
+DBComparer.exe source:3306\db user\pass target:3306\db user\pass > script.sql
 ```
 
 ### 3. **Replicar Tablas Maestras**
 ```bash
-DBComparer.exe prod:3306\erp user\pass dev:3306\erp user\pass --include-tables=paises,provincias,categorias --with-data
+DBComparer.exe prod:3306\erp user\pass dev:3306\erp user\pass --include-tables=paises,provincias,categorias --with-data > script.sql
 ```
 
 ### 4. **Sincronización Continua (CI/CD)**
 ```bash
 # En un script de Jenkins/GitLab CI
-DBComparerPostGre.exe prod-db:5432\app\public admin\pass stage-db:5432\app\public admin\pass --with-data-diff --nodelete
+DBComparerPostGre.exe prod-db:5432\app\public admin\pass stage-db:5432\app\public admin\pass --with-data-diff --nodelete > script.sql
 ```
 
 ### 5. **Migración entre Motores Diferentes**
@@ -319,9 +320,9 @@ Consulta el archivo [LICENSE](LICENSE) para más detalles.
 
 ## 📞 Soporte
 
-- 🐛 **Issues**: [GitHub Issues](https://github.com/tuusuario/DBComparer/issues)
+- 🐛 **Issues**: [GitHub Issues](https://github.com/alexdelphiAthn/DBComparer/issues)
 - 📧 **Email**: alejandro.laorden@protonmail.com
-- 💬 **Discusiones**: [GitHub Discussions](https://github.com/tuusuario/DBComparer/discussions)
+- 💬 **Discusiones**: [GitHub Discussions](https://github.com/alexdelphiAthn/DBComparer/discussions)
 
 ---
 
