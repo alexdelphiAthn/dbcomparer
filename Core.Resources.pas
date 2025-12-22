@@ -99,6 +99,16 @@ type
     class var ExIBServer: string;      // Ejemplo servidor sin puerto
     class var ExIBEmbedded: string;    // Ejemplo embebido
     class var ExIBFilter: string;      // Ejemplo filtro tablas
+
+    // Específicos PostgreSQL
+    class var UsagePGCmd: string;     // Comando de uso principal
+    class var MsgPGSchema: string;    // Nota sobre schemas
+
+    // Ejemplos PostgreSQL
+    class var ExPGFull: string;       // Ejemplo completo con puertos
+    class var ExPGSchema: string;     // Ejemplo especificando schema
+    class var ExPGSimple: string;     // Ejemplo simple sin puertos explícitos
+    class var ExPGFilter: string;     // Ejemplo filtro tablas
   end;
 
 implementation
@@ -215,6 +225,22 @@ begin
     TRes.ExIBEmbedded := '  %s \C:\DB\local.gdb SYSDBA\masterkey '+
                          '\C:\DB\local_test.gdb SYSDBA\masterkey --with-data-diff';
     TRes.ExIBFilter   := '  %s ... --with-data-diff --include-tables=CLIENTES,PRODUCTOS';
+    TRes.UsagePGCmd  := '  %s servidor1:puerto1\database1 usuario1\password1 '+
+                        'servidor2:puerto2\database2 usuario2\password2 [opciones]';
+
+    TRes.MsgPGSchema := '      Para especificar schema: database\schema (por defecto: public)';
+
+    // Ejemplos
+    TRes.ExPGFull    := '  %s localhost:5432\midb_prod postgres\pass123 '+
+                        'localhost:5432\midb_dev postgres\pass456 --nodelete --with-triggers';
+
+    TRes.ExPGSchema  := '  %s servidor1:5432\midb\public usuario\pass '+
+                        'servidor2:5432\midb\test_schema usuario\pass --with-data-diff --nodelete';
+
+    TRes.ExPGSimple  := '  %s localhost\midb postgres\pass '+
+                        'localhost\midb_test postgres\pass --with-data-diff';
+
+    TRes.ExPGFilter  := '  %s ... --with-data-diff --include-tables=clientes,productos';
   end
   else
   begin
@@ -315,6 +341,23 @@ begin
                          '\C:\DB\local_test.gdb SYSDBA\masterkey --with-data-diff';
 
     TRes.ExIBFilter   := '  %s ... --with-data-diff --include-tables=CUSTOMERS,PRODUCTS';
+    // --- POSTGRESQL ENGLISH ---
+    TRes.UsagePGCmd  := '  %s server1:port1\database1 user1\password1 '+
+                        'server2:port2\database2 user2\password2 [options]';
+
+    TRes.MsgPGSchema := '      To specify schema: database\schema (default: public)';
+
+    // Ejemplos (Adapting db names and users)
+    TRes.ExPGFull    := '  %s localhost:5432\mydb_prod postgres\pass123 '+
+                        'localhost:5432\mydb_dev postgres\pass456 --nodelete --with-triggers';
+
+    TRes.ExPGSchema  := '  %s server1:5432\mydb\public user\pass '+
+                        'server2:5432\mydb\test_schema user\pass --with-data-diff --nodelete';
+
+    TRes.ExPGSimple  := '  %s localhost\mydb postgres\pass '+
+                        'localhost\mydb_test postgres\pass --with-data-diff';
+
+    TRes.ExPGFilter  := '  %s ... --with-data-diff --include-tables=customers,products';
   end;
 end;
 

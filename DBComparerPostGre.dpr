@@ -11,42 +11,55 @@ uses
   Providers.PostgreSQL in 'Providers.PostgreSQL.pas',
   ScriptWriters in 'ScriptWriters.pas',
   Providers.PostgreSQL.Helpers in 'Providers.PostgreSQL.Helpers.pas',
-  System.SysUtils;
+  System.SysUtils,
+  Core.Resources in 'Core.Resources.pas';
 
 procedure ShowUsage;
 begin
-  Writeln('Uso:');
-  Writeln('  DBComparerPostgreSQL servidor1:puerto1\database1 usuario1\password1 '+
-          'servidor2:puerto2\database2 usuario2\password2 [opciones]');
+ Writeln(TRes.UsageHeader); // "Uso:"
+  Writeln(Format(TRes.UsagePGCmd, ['DBComparerPostgreSQL']));
   Writeln('');
-  Writeln('Nota: Puerto por defecto es 5432 si se omite');
-  Writeln('      Para especificar schema: database\schema (por defecto: public)');
+
+  // Nota del puerto (Reutilizamos la variable genérica pasando 5432)
+  Writeln(Format(TRes.UsageNotePort, [5432]));
+
+  // Nota específica de Schema
+  Writeln(TRes.MsgPGSchema);
   Writeln('');
-  Writeln('Opciones:');
-  Writeln('  --nodelete           No elimina tablas, columnas ni índices en destino');
-  Writeln('  --with-triggers      Incluye comparación de triggers');
-  Writeln('  --with-data          Copia todos los datos de origen a destino (INSERT)');
-  Writeln('  --with-data-diff     Sincroniza datos comparando por clave primaria');
-  Writeln('                       (INSERT nuevos, UPDATE modificados, DELETE si no --nodelete)');
-  Writeln('  --exclude-tables=T1,T2...  Excluye tablas específicas de la sincronización de datos');
-  Writeln('                             (Lista Negra: Sincroniza todo MENOS esto)');
-  Writeln('  --include-tables=T1,T2...  Solo sincroniza datos de estas tablas');
-  Writeln('                             (Lista Blanca: Solo sincroniza ESTO, ignora el resto)');
+
+  // Opciones Comunes
+  Writeln(TRes.OptionsHeader); // "Opciones:"
+  Writeln('  --nodelete           ' + TRes.OptNoDelete);
+  Writeln('  --with-triggers      ' + TRes.OptTriggers);
+  Writeln('  --with-data          ' + TRes.OptWithData);
+  Writeln('  --with-data-diff     ' + TRes.OptDataDiff);
+  Writeln('                       (INSERT/UPDATE/DELETE)');
+  Writeln('  --exclude-tables=... ' + TRes.OptExclude);
+  Writeln('                             ' + TRes.OptExcludeDesc);
+  Writeln('  --include-tables=... ' + TRes.OptInclude);
+  Writeln('                             ' + TRes.OptIncludeDesc);
   Writeln('');
-  Writeln('Ejemplos:');
-  Writeln('  DBComparerPostgreSQL localhost:5432\midb_prod postgres\pass123 '+
-          'localhost:5432\midb_dev postgres\pass456 --nodelete --with-triggers');
+
+  // Ejemplos
+  Writeln(TRes.ExamplesHeader); // "Ejemplos:"
+
+  // Ejemplo 1: Localhost completo
+  Writeln(Format(TRes.ExPGFull, ['DBComparerPostgreSQL']));
   Writeln('');
-  Writeln('  DBComparerPostgreSQL servidor1:5432\midb\public usuario\pass '+
-          'servidor2:5432\midb\test_schema usuario\pass --with-data-diff --nodelete');
+
+  // Ejemplo 2: Uso de Schemas explícitos
+  Writeln(Format(TRes.ExPGSchema, ['DBComparerPostgreSQL']));
   Writeln('');
-  Writeln('  DBComparerPostgreSQL localhost\midb postgres\pass '+
-          'localhost\midb_test postgres\pass --with-data-diff');
+
+  // Ejemplo 3: Simple
+  Writeln(Format(TRes.ExPGSimple, ['DBComparerPostgreSQL']));
   Writeln('');
-  Writeln('  DBComparerPostgreSQL ... --with-data-diff --include-tables=clientes,productos');
+
+  // Ejemplo 4: Filtros
+  Writeln(Format(TRes.ExPGFilter, ['DBComparerPostgreSQL']));
+
   Writeln('');
-  Writeln('El resultado se imprime por la salida estándar. '+
-          'Para guardarlo en archivo:');
+  Writeln(TRes.FooterFile);
   Writeln('  DBComparerPostgreSQL ... > script.sql');
   Writeln('');
   Halt(1);
