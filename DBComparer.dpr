@@ -9,38 +9,34 @@ uses
   Providers.MySQL in 'Providers.MySQL.pas',
   ScriptWriters in 'ScriptWriters.pas',
   Providers.MySQL.Helpers in 'Providers.MySQL.Helpers.pas',
-  System.SysUtils;
+  System.SysUtils,
+  Core.Resources in 'Core.Resources.pas';
 
 procedure ShowUsage;
 begin
-  Writeln('Uso:');
-  Writeln('  DBComparer servidor1:puerto1\database1 usuario1\password1 '+
-          'servidor2:puerto2\database2 usuario2\password2 [opciones]');
+  Writeln(TRes.UsageHeader);
+  Writeln(Format(TRes.UsageExampleCmd, ['DBComparer']));
   Writeln('');
-  Writeln('Opciones:');
-  Writeln('  --nodelete           No elimina tablas, columnas ni índices en destino');
-  Writeln('  --with-triggers      Incluye comparación de triggers');
-  Writeln('  --with-data          Copia todos los datos de origen a destino (INSERT)');
-  Writeln('  --with-data-diff     Sincroniza datos comparando por clave primaria');
-  Writeln('                       (INSERT nuevos, UPDATE modificados, DELETE si no --nodelete)');
-  Writeln('  --exclude-tables=T1,T2...  Excluye tablas específicas de la sincronización de datos');
-  Writeln('                             (Lista Negra: Sincroniza todo MENOS esto)');
-  // --- NUEVA OPCIÓN ---
-  Writeln('  --include-tables=T1,T2...  Solo sincroniza datos de estas tablas');
-  Writeln('                             (Lista Blanca: Solo sincroniza ESTO, ignora el resto)');
+  Writeln(TRes.OptionsHeader);
+  Writeln('  --nodelete           ' + TRes.OptNoDelete);
+  Writeln('  --with-triggers      ' + TRes.OptTriggers);
+  Writeln('  --with-data          ' + TRes.OptWithData);
+  Writeln('  --with-data-diff     ' + TRes.OptDataDiff);
+  Writeln('  --exclude-tables=T1,T2... ' + TRes.OptExclude);
+  Writeln('                            ' + TRes.OptExcludeDesc);
+  Writeln('  --include-tables=T1,T2...  '+ TRes.OptInclude);
+  Writeln('                             '+ TRes.OptIncludeDesc);
   Writeln('');
-  Writeln('Ejemplos:');
+  Writeln(TRes.ExamplesHeader);
   Writeln('  DBComparer localhost:3306\midb_prod root\pass123 '+
           'localhost:3306\midb_dev root\pass456 --nodelete --with-triggers');
   Writeln('');
   Writeln('  DBComparer localhost:3306\prod root\pass '+
           'localhost:3306\dev root\pass --with-data-diff --nodelete');
   Writeln('');
-  // --- NUEVO EJEMPLO ---
   Writeln('  DBComparer ... --with-data-diff --include-tables=fza_paises,fza_monedas');
   Writeln('');
-  Writeln('El resultado se imprime por la salida estándar. '+
-          'Para guardarlo en archivo:');
+  Writeln(TRes.FooterFile);
   Writeln('  DBComparer ... > script.sql');
   Writeln('');
   Halt(1);
@@ -56,6 +52,8 @@ var
   SourceHelpers: IDBHelpers;
 begin
   try
+    FormatSettings := TFormatSettings.Create('en-US');
+    Set8087CW($133F);
     if (ParamCount < 4) then
     begin
       ShowUsage;
