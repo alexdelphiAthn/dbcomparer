@@ -28,11 +28,11 @@ begin
   Writeln('                             '+ TRes.OptIncludeDesc);
   Writeln('');
   Writeln(TRes.ExamplesHeader);
-  Writeln('  DBComparer localhost:3306\midb_prod root\pass123 '+
-          'localhost:3306\midb_dev root\pass456 --nodelete --with-triggers');
+  Writeln('  DBComparer localhost:3306\origin_prod root\pass123 '+
+          'localhost:3306\destiny_dev root\pass456 --nodelete --with-triggers');
   Writeln('');
-  Writeln('  DBComparer localhost:3306\prod root\pass '+
-          'localhost:3306\dev root\pass --with-data-diff --nodelete');
+  Writeln('  DBComparer localhost:3306\dev root\pass '+
+          'localhost:3306\prod root\pass --with-data-diff --nodelete');
   Writeln('');
   Writeln('  DBComparer ... --with-data-diff --include-tables=fza_paises,fza_monedas');
   Writeln('');

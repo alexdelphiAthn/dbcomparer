@@ -142,14 +142,33 @@ function TMySQLHelpers.GenerateColumnDefinition(const Col: TColumnInfo): string;
 var
   DefVal: string;
 begin
+  // 1. Definición básica: `Nombre` Tipo
   Result := '`' + Col.ColumnName + '` ' + Col.DataType;
+
+  // 2. Definir NULL o NOT NULL
   if SameText(Col.IsNullable, 'NO') then
     Result := Result + ' NOT NULL'
   else
     Result := Result + ' NULL';
-  if (not SameText(Col.ColumnDefault, '')) and
-     (not SameText(Col.ColumnDefault, 'NULL')) then
+
+  // 3. Lógica para el DEFAULT (Aquí estaba el conflicto)
+  // ---------------------------------------------------
+
+  // CASO A: El lector detectó que NO hay valor por defecto (marca interna '<NULL>')
+  if Col.ColumnDefault = '<NULL>' then
   begin
+    // Solo escribimos "DEFAULT NULL" si la columna permite nulos.
+    if not SameText(Col.IsNullable, 'NO') then
+      Result := Result + ' DEFAULT NULL';
+
+    // Si es NOT NULL, no hacemos nada. MySQL asume que es obligatorio.
+    // Esto evita el Error 1067: "Invalid default value for 'CODIGO_VAR'"
+  end
+
+  // CASO B: Hay un valor por defecto explícito (distinto de nuestra marca y de vacío)
+  else if (Col.ColumnDefault <> '') then
+  begin
+    // Sub-caso: Funciones de fecha (CURRENT_TIMESTAMP, NOW()) - No llevan comillas
     if (Pos('CURRENT_TIMESTAMP', UpperCase(Col.ColumnDefault)) > 0) or
        (Pos('NOW()', UpperCase(Col.ColumnDefault)) > 0) then
     begin
@@ -157,20 +176,26 @@ begin
     end
     else
     begin
+      // Sub-caso: Valores literales (Strings, números, '0', 'S')
       DefVal := Col.ColumnDefault;
-      // Eliminar comillas duplicadas si ya las tiene
+
+      // Mantenemos tu limpieza de comillas por seguridad (si el string ya venía con comillas simples)
       if (Length(DefVal) >= 2) and (DefVal[1] = '''') and
          (DefVal[Length(DefVal)] = '''') then
         DefVal := Copy(DefVal, 2, Length(DefVal) - 2);
+
+      // Envolvemos en QuotedStr para generar el SQL correcto: DEFAULT 'Valor'
       Result := Result + ' DEFAULT ' + QuotedStr(DefVal);
     end;
-  end
-  else if Col.ColumnDefault = 'NULL' then
-    Result := Result + ' DEFAULT NULL';
+  end;
+
+  // 4. Extras (Auto Increment, On Update, Comentarios)
   if Pos('auto_increment', LowerCase(Col.Extra)) > 0 then
     Result := Result + ' AUTO_INCREMENT';
+
   if Pos('on update', LowerCase(Col.Extra)) > 0 then
     Result := Result + ' ON UPDATE CURRENT_TIMESTAMP';
+
   if not SameText(Col.ColumnComment, '') then
     Result := Result + ' COMMENT ' + QuotedStr(Col.ColumnComment);
 end;
@@ -232,42 +257,42 @@ function TMySQLHelpers.GenerateDropColumnSQL(const TableName,
   ColumnName: string): string;
 begin
   Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
-            ' DROP COLUMN ' + QuoteIdentifier(ColumnName);
+            ' DROP COLUMN ' + QuoteIdentifier(ColumnName) + ';';
 end;
 
 function TMySQLHelpers.GenerateDropFunction(const FuncName: string): string;
 begin
-  Result:= 'DROP FUNCTION IF EXISTS ' + QuoteIdentifier(FuncName);
+  Result:= 'DROP FUNCTION IF EXISTS ' + QuoteIdentifier(FuncName) + ';';
 end;
 
 function TMySQLHelpers.GenerateDropTableSQL(const TableName:String): string;
 begin
-  Result := 'DROP TABLE IF EXISTS ' + QuoteIdentifier(TableName);
+  Result := 'DROP TABLE IF EXISTS ' + QuoteIdentifier(TableName) + ';';
 end;
 
 function TMySQLHelpers.GenerateDropTrigger(const Trigger: string): string;
 begin
-  Result := 'DROP TRIGGER IF EXISTS ' + QuoteIdentifier(Trigger);
+  Result := 'DROP TRIGGER IF EXISTS ' + QuoteIdentifier(Trigger) + ';';
 end;
 
 function TMySQLHelpers.GenerateDropView(const View: string): string;
 begin
-  Result := 'DROP VIEW IF EXISTS ' + QuoteIdentifier(View);
+  Result := 'DROP VIEW IF EXISTS ' + QuoteIdentifier(View) + ';';
 end;
 
 function TMySQLHelpers.GenerateDropIndexSQL(const TableName,
   IndexName: string): string;
 begin
   if SameText(IndexName, 'PRIMARY') then
-    Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) + ' DROP PRIMARY KEY'
+    Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) + ' DROP PRIMARY KEY;'
   else
     Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
-              ' DROP INDEX ' + QuoteIdentifier(IndexName);
+              ' DROP INDEX ' + QuoteIdentifier(IndexName)+';';
 end;
 
 function TMySQLHelpers.GenerateDropProcedure(const Proc: string): string;
 begin
-  Result:= 'DROP PROCEDURE IF EXISTS ' + QuoteIdentifier(Proc);
+  Result:= 'DROP PROCEDURE IF EXISTS ' + QuoteIdentifier(Proc) + ';';
 end;
 
 function TMySQLHelpers.GenerateIndexDefinition(const TableName: string;
@@ -285,22 +310,22 @@ begin
   end;
   if Idx.IsPrimary then
     Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
-              ' ADD PRIMARY KEY (' + ColNames + ')'
+              ' ADD PRIMARY KEY (' + ColNames + ');'
   else if Idx.IsUnique then
     Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
               ' ADD UNIQUE INDEX ' + QuoteIdentifier(Idx.IndexName) +
-              ' (' + ColNames + ')'
+              ' (' + ColNames + ');'
   else
     Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
               ' ADD INDEX ' + QuoteIdentifier(Idx.IndexName) +
-              ' (' + ColNames + ')';
+              ' (' + ColNames + ');';
 end;
 
 function TMySQLHelpers.GenerateModifyColumnSQL(const TableName: string;
   const ColumnInfo: TColumnInfo): string;
 begin
   Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
-            ' MODIFY COLUMN ' + GenerateColumnDefinition(ColumnInfo);
+            ' MODIFY COLUMN ' + GenerateColumnDefinition(ColumnInfo)+';';
 end;
 
 
