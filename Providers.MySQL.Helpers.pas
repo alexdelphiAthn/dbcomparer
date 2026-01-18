@@ -323,16 +323,16 @@ begin
   if Idx.IsPrimary then
   begin
     Result :=
-      '-- Limpieza de duplicados previa a la creación de PK' + sLineBreak +
-      'DELETE FROM ' + QuoteIdentifier(TableName) + ' WHERE ' +
-      '(' + ColNames + ') IN (' +
-        'SELECT ' + ColNames + ' FROM (' +
-          'SELECT ' + ColNames +
-          ' FROM ' + QuoteIdentifier(TableName) +
-          ' GROUP BY ' + ColNames +
-          ' HAVING COUNT(*) > 1' +
-        ') AS c' +
-      ');' + sLineBreak + sLineBreak +
+      '-- Descomenta para limpieza de duplicados previa a la creación de PK' + sLineBreak +
+      '-- DELETE FROM ' + QuoteIdentifier(TableName) + ' WHERE ' +
+      '-- (' + ColNames + ') IN (' +
+        '-- SELECT ' + ColNames + ' FROM (' +
+          '-- SELECT ' + ColNames +
+          '-- FROM ' + QuoteIdentifier(TableName) +
+          '-- GROUP BY ' + ColNames +
+          '-- HAVING COUNT(*) > 1' +
+        '-- ) AS c' +
+      '-- );' + sLineBreak + sLineBreak +
       'ALTER TABLE ' + QuoteIdentifier(TableName) +
       ' ADD PRIMARY KEY (' + ColNames + ');';
   end
