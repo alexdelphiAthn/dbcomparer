@@ -135,7 +135,7 @@ function TMySQLHelpers.GenerateAddColumnSQL(const TableName: string;
   const ColumnInfo: TColumnInfo): string;
 begin
   Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
-            ' ADD COLUMN ' + GenerateColumnDefinition(ColumnInfo);
+            ' ADD COLUMN ' + GenerateColumnDefinition(ColumnInfo) + ';';
 end;
 
 function TMySQLHelpers.GenerateColumnDefinition(const Col: TColumnInfo): string;
@@ -150,52 +150,35 @@ begin
     Result := Result + ' NOT NULL'
   else
     Result := Result + ' NULL';
-
-  // 3. Lógica para el DEFAULT (Aquí estaba el conflicto)
-  // ---------------------------------------------------
-
-  // CASO A: El lector detectó que NO hay valor por defecto (marca interna '<NULL>')
   if Col.ColumnDefault = '<NULL>' then
   begin
-    // Solo escribimos "DEFAULT NULL" si la columna permite nulos.
     if not SameText(Col.IsNullable, 'NO') then
       Result := Result + ' DEFAULT NULL';
-
-    // Si es NOT NULL, no hacemos nada. MySQL asume que es obligatorio.
-    // Esto evita el Error 1067: "Invalid default value for 'CODIGO_VAR'"
   end
-
-  // CASO B: Hay un valor por defecto explícito (distinto de nuestra marca y de vacío)
   else if (Col.ColumnDefault <> '') then
   begin
-    // Sub-caso: Funciones de fecha (CURRENT_TIMESTAMP, NOW()) - No llevan comillas
-    if (Pos('CURRENT_TIMESTAMP', UpperCase(Col.ColumnDefault)) > 0) or
-       (Pos('NOW()', UpperCase(Col.ColumnDefault)) > 0) then
+    if SameText(Col.ColumnDefault, 'NULL') then
+    begin
+       Result := Result + ' DEFAULT NULL';
+    end
+    else if (Pos('CURRENT_TIMESTAMP', UpperCase(Col.ColumnDefault)) > 0) or
+            (Pos('NOW()', UpperCase(Col.ColumnDefault)) > 0) then
     begin
       Result := Result + ' DEFAULT ' + Col.ColumnDefault;
     end
     else
     begin
-      // Sub-caso: Valores literales (Strings, números, '0', 'S')
       DefVal := Col.ColumnDefault;
-
-      // Mantenemos tu limpieza de comillas por seguridad (si el string ya venía con comillas simples)
       if (Length(DefVal) >= 2) and (DefVal[1] = '''') and
          (DefVal[Length(DefVal)] = '''') then
         DefVal := Copy(DefVal, 2, Length(DefVal) - 2);
-
-      // Envolvemos en QuotedStr para generar el SQL correcto: DEFAULT 'Valor'
       Result := Result + ' DEFAULT ' + QuotedStr(DefVal);
     end;
   end;
-
-  // 4. Extras (Auto Increment, On Update, Comentarios)
   if Pos('auto_increment', LowerCase(Col.Extra)) > 0 then
     Result := Result + ' AUTO_INCREMENT';
-
   if Pos('on update', LowerCase(Col.Extra)) > 0 then
     Result := Result + ' ON UPDATE CURRENT_TIMESTAMP';
-
   if not SameText(Col.ColumnComment, '') then
     Result := Result + ' COMMENT ' + QuotedStr(Col.ColumnComment);
 end;
@@ -222,24 +205,38 @@ var
   i: Integer;
   PKList: TStringList;
   ColDef: string;
+  IsLastColumn: Boolean;
 begin
   Result := 'CREATE TABLE ' + QuoteIdentifier(Table.TableName) + ' (' + sLineBreak;
   PKList := TStringList.Create;
   try
+    // 1. Recorremos todas las columnas
     for i := 0 to Table.Columns.Count - 1 do
     begin
-      // Usar tu método existente
       ColDef := '  ' + GenerateColumnDefinition(Table.Columns[i]);
-      // Detectar PK para añadirla al final
+
+      // Detectamos si es PK y la guardamos
       if SameText(Table.Columns[i].ColumnKey, 'PRI') then
         PKList.Add(QuoteIdentifier(Table.Columns[i].ColumnName));
-      if i < Table.Columns.Count - 1 then
+
+      // Determinamos si es la última columna de la lista
+      IsLastColumn := (i = Table.Columns.Count - 1);
+
+      // --- CORRECCIÓN DE LA COMA ---
+      // Ponemos coma si NO es la última columna...
+      // ...O si SIENDO la última, tenemos una PK que agregar después.
+      if (not IsLastColumn) or (PKList.Count > 0) then
+      begin
         ColDef := ColDef + ',';
+      end;
+
       Result := Result + ColDef + sLineBreak;
     end;
-    // Agregar PK inline
+
+    // 2. Agregar PK inline (Ahora la sintaxis será correcta)
     if PKList.Count > 0 then
       Result := Result + '  PRIMARY KEY (' + PKList.CommaText + ')' + sLineBreak;
+
     Result := Result + ');';
   finally
     PKList.Free;
@@ -280,14 +277,26 @@ begin
   Result := 'DROP VIEW IF EXISTS ' + QuoteIdentifier(View) + ';';
 end;
 
-function TMySQLHelpers.GenerateDropIndexSQL(const TableName,
-  IndexName: string): string;
+function TMySQLHelpers.GenerateDropIndexSQL(const TableName, IndexName: string): string;
 begin
   if SameText(IndexName, 'PRIMARY') then
-    Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) + ' DROP PRIMARY KEY;'
+  begin
+    Result :=
+      'SET @pk_exists := (SELECT COUNT(*) FROM information_schema.table_constraints ' +
+      'WHERE table_schema = DATABASE() AND table_name = ' + QuotedStr(TableName) +
+      ' AND constraint_type = ''PRIMARY KEY'');' + sLineBreak +
+      'SET @sql_drop := IF(@pk_exists > 0, ' +
+      '''ALTER TABLE ' + QuoteIdentifier(TableName) + ' DROP PRIMARY KEY'', ' +
+      '''SELECT "No Primary Key to drop"'');' + sLineBreak +
+      'PREPARE stmt FROM @sql_drop;' + sLineBreak +
+      'EXECUTE stmt;' + sLineBreak +
+      'DEALLOCATE PREPARE stmt;';
+  end
   else
+  begin
     Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
-              ' DROP INDEX ' + QuoteIdentifier(IndexName)+';';
+              ' DROP INDEX ' + QuoteIdentifier(IndexName) + ';';
+  end;
 end;
 
 function TMySQLHelpers.GenerateDropProcedure(const Proc: string): string;
@@ -296,11 +305,12 @@ begin
 end;
 
 function TMySQLHelpers.GenerateIndexDefinition(const TableName: string;
-                                                     const Idx: TIndexInfo): string;
+                                               const Idx: TIndexInfo): string;
 var
   i: Integer;
   ColNames: string;
 begin
+  // Construir la lista de columnas: `col1`, `col2`...
   ColNames := '';
   for i := 0 to High(Idx.Columns) do
   begin
@@ -308,17 +318,38 @@ begin
       ColNames := ColNames + ', ';
     ColNames := ColNames + QuoteIdentifier(Idx.Columns[i].ColumnName);
   end;
+
+  // Lógica principal
   if Idx.IsPrimary then
-    Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
-              ' ADD PRIMARY KEY (' + ColNames + ');'
+  begin
+    Result :=
+      '-- Limpieza de duplicados previa a la creación de PK' + sLineBreak +
+      'DELETE FROM ' + QuoteIdentifier(TableName) + ' WHERE ' +
+      '(' + ColNames + ') IN (' +
+        'SELECT ' + ColNames + ' FROM (' +
+          'SELECT ' + ColNames +
+          ' FROM ' + QuoteIdentifier(TableName) +
+          ' GROUP BY ' + ColNames +
+          ' HAVING COUNT(*) > 1' +
+        ') AS c' +
+      ');' + sLineBreak + sLineBreak +
+      'ALTER TABLE ' + QuoteIdentifier(TableName) +
+      ' ADD PRIMARY KEY (' + ColNames + ');';
+  end
   else if Idx.IsUnique then
+  begin
+    // Aplicamos la misma lógica para índices únicos
     Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
               ' ADD UNIQUE INDEX ' + QuoteIdentifier(Idx.IndexName) +
-              ' (' + ColNames + ');'
+              ' (' + ColNames + ');';
+  end
   else
+  begin
+    // Índices normales (no requieren unicidad)
     Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
               ' ADD INDEX ' + QuoteIdentifier(Idx.IndexName) +
               ' (' + ColNames + ');';
+  end;
 end;
 
 function TMySQLHelpers.GenerateModifyColumnSQL(const TableName: string;

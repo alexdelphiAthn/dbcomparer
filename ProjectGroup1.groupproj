@@ -1,0 +1,84 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{EDE360CB-0BCE-4842-99FC-395BC56079EB}</ProjectGuid>
+    </PropertyGroup>
+    <ItemGroup>
+        <Projects Include="DBComparerPostGre.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="DBComparer.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="DBComparerInterbase.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="DBComparerOracle.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="DBComparerSQLServer.dproj">
+            <Dependencies/>
+        </Projects>
+    </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Default.Personality.12</Borland.Personality>
+        <Borland.ProjectType/>
+        <BorlandProject>
+            <Default.Personality/>
+        </BorlandProject>
+    </ProjectExtensions>
+    <Target Name="DBComparerPostGre">
+        <MSBuild Projects="DBComparerPostGre.dproj"/>
+    </Target>
+    <Target Name="DBComparerPostGre:Clean">
+        <MSBuild Projects="DBComparerPostGre.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="DBComparerPostGre:Make">
+        <MSBuild Projects="DBComparerPostGre.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="DBComparer">
+        <MSBuild Projects="DBComparer.dproj"/>
+    </Target>
+    <Target Name="DBComparer:Clean">
+        <MSBuild Projects="DBComparer.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="DBComparer:Make">
+        <MSBuild Projects="DBComparer.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="DBComparerInterbase">
+        <MSBuild Projects="DBComparerInterbase.dproj"/>
+    </Target>
+    <Target Name="DBComparerInterbase:Clean">
+        <MSBuild Projects="DBComparerInterbase.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="DBComparerInterbase:Make">
+        <MSBuild Projects="DBComparerInterbase.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="DBComparerOracle">
+        <MSBuild Projects="DBComparerOracle.dproj"/>
+    </Target>
+    <Target Name="DBComparerOracle:Clean">
+        <MSBuild Projects="DBComparerOracle.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="DBComparerOracle:Make">
+        <MSBuild Projects="DBComparerOracle.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="DBComparerSQLServer">
+        <MSBuild Projects="DBComparerSQLServer.dproj"/>
+    </Target>
+    <Target Name="DBComparerSQLServer:Clean">
+        <MSBuild Projects="DBComparerSQLServer.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="DBComparerSQLServer:Make">
+        <MSBuild Projects="DBComparerSQLServer.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="Build">
+        <CallTarget Targets="DBComparerPostGre;DBComparer;DBComparerInterbase;DBComparerOracle;DBComparerSQLServer"/>
+    </Target>
+    <Target Name="Clean">
+        <CallTarget Targets="DBComparerPostGre:Clean;DBComparer:Clean;DBComparerInterbase:Clean;DBComparerOracle:Clean;DBComparerSQLServer:Clean"/>
+    </Target>
+    <Target Name="Make">
+        <CallTarget Targets="DBComparerPostGre:Make;DBComparer:Make;DBComparerInterbase:Make;DBComparerOracle:Make;DBComparerSQLServer:Make"/>
+    </Target>
+    <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
+</Project>

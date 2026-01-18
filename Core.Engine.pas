@@ -97,47 +97,44 @@ procedure TDBComparerEngine.CreateNewTable(const TableName: string);
 var
   Table: TTableInfo;
   Indexes: TArray<TIndexInfo>;
-  i: Integer;
   Idx: TIndexInfo;
-  PKList: TStringList;
-  ColDef: string;
+  // Variables eliminadas: i, PKList, ColDef (ya no hacen falta aquí)
 begin
   FWriter.AddComment(TRes.MsgNewTable + TableName);
+
+  // 1. Obtener la estructura y los índices desde el Origen
   Table := FSourceDB.GetTableStructure(TableName);
-  PKList := TStringList.Create;
+  Indexes := FSourceDB.GetTableIndexes(TableName);
+
   try
-    // Generar CREATE TABLE
-    FWriter.AddCommand('CREATE TABLE `' + TableName + '` (');
-    // Definiciones de columnas
-    for i := 0 to Table.Columns.Count - 1 do
-    begin
-      // Detectar si es PK
-      if SameText(Table.Columns[i].ColumnKey, 'PRI') then
-        PKList.Add('`' + Table.Columns[i].ColumnName + '`');
-      ColDef := '  ' + FHelpers.GenerateColumnDefinition(Table.Columns[i]);
-      // Agregar coma si no es la última columna O si hay PK pendiente
-      if (i < Table.Columns.Count - 1) or (PKList.Count > 0) then
-        ColDef := ColDef + ',';
-      FWriter.AddCommand(ColDef);
-    end;
-    // Agregar PRIMARY KEY inline si existe
-    if PKList.Count > 0 then
-      FWriter.AddCommand('  PRIMARY KEY (' + PKList.CommaText + ')');
-    FWriter.AddCommand(')');
-    FWriter.AddCommand('');
-    // Agregar índices secundarios (no PRIMARY)
-    Indexes := FSourceDB.GetTableIndexes(TableName);
+    // -----------------------------------------------------------------------
+    // CORRECCIÓN: Delegar al Provider (MySQL, Firebird, etc)
+    // -----------------------------------------------------------------------
+    // En lugar de construir el string manualmente aquí, llamamos a la interfaz.
+    // Esto ejecutará TMySQLHelpers.GenerateCreateTableSQL
+    FWriter.AddCommand(FHelpers.GenerateCreateTableSQL(Table, Indexes));
+
+    // -----------------------------------------------------------------------
+    // 3. Crear índices secundarios (No Primary Key)
+    // -----------------------------------------------------------------------
+    // Nota: GenerateCreateTableSQL (en MySQL Helper) incluye la Primary Key,
+    // pero habitualmente los índices secundarios se agregan después
+    // o el helper de creación de tabla solo devuelve el 'CREATE TABLE'.
+    // Mantenemos este bucle para asegurar que se crean los índices UNIQUE/KEY.
     for Idx in Indexes do
     begin
       if not Idx.IsPrimary then
       begin
-        FWriter.AddComment(TRes.MsgAddIndex  + TableName + '.' + Idx.IndexName);
+        FWriter.AddComment(TRes.MsgAddIndex + TableName + '.' + Idx.IndexName);
         FWriter.AddCommand(FHelpers.GenerateIndexDefinition(TableName, Idx));
       end;
     end;
+
   finally
     Table.Free;
-    PKList.Free;
+    // Indexes es un array dinámico gestionado automáticamente por el compilador,
+    // pero si TIndexInfo contuviera objetos habría que liberarlos.
+    // Al ser Records, no es necesario liberar el array explícitamente.
   end;
 end;
 
