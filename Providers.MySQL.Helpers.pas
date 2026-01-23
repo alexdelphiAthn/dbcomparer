@@ -144,7 +144,6 @@ var
 begin
   // 1. Definición básica: `Nombre` Tipo
   Result := '`' + Col.ColumnName + '` ' + Col.DataType;
-
   // 2. Definir NULL o NOT NULL
   if SameText(Col.IsNullable, 'NO') then
     Result := Result + ' NOT NULL'
@@ -214,14 +213,11 @@ begin
     for i := 0 to Table.Columns.Count - 1 do
     begin
       ColDef := '  ' + GenerateColumnDefinition(Table.Columns[i]);
-
       // Detectamos si es PK y la guardamos
       if SameText(Table.Columns[i].ColumnKey, 'PRI') then
         PKList.Add(QuoteIdentifier(Table.Columns[i].ColumnName));
-
       // Determinamos si es la última columna de la lista
       IsLastColumn := (i = Table.Columns.Count - 1);
-
       // --- CORRECCIÓN DE LA COMA ---
       // Ponemos coma si NO es la última columna...
       // ...O si SIENDO la última, tenemos una PK que agregar después.
@@ -229,14 +225,11 @@ begin
       begin
         ColDef := ColDef + ',';
       end;
-
       Result := Result + ColDef + sLineBreak;
     end;
-
     // 2. Agregar PK inline (Ahora la sintaxis será correcta)
     if PKList.Count > 0 then
       Result := Result + '  PRIMARY KEY (' + PKList.CommaText + ')' + sLineBreak;
-
     Result := Result + ');';
   finally
     PKList.Free;
@@ -318,7 +311,6 @@ begin
       ColNames := ColNames + ', ';
     ColNames := ColNames + QuoteIdentifier(Idx.Columns[i].ColumnName);
   end;
-
   // Lógica principal
   if Idx.IsPrimary then
   begin
@@ -354,10 +346,36 @@ end;
 
 function TMySQLHelpers.GenerateModifyColumnSQL(const TableName: string;
   const ColumnInfo: TColumnInfo): string;
+var
+  SanitizeSQL: string;
+  MaxLen: Integer;
 begin
-  Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
-            ' MODIFY COLUMN ' + GenerateColumnDefinition(ColumnInfo)+';';
+  SanitizeSQL := '';
+  MaxLen := StrToIntDef(ColumnInfo.CharMaxLength, 0);
+  if (MaxLen > 0) and
+     (ContainsText(ColumnInfo.DataType, 'char') or
+      ContainsText(ColumnInfo.DataType, 'text')) then
+  begin
+     SanitizeSQL := SanitizeSQL +
+       'UPDATE ' + QuoteIdentifier(TableName) +
+       ' SET ' + QuoteIdentifier(ColumnInfo.ColumnName) +
+       ' = LEFT(' + QuoteIdentifier(ColumnInfo.ColumnName) + ', ' +
+                    IntToStr(MaxLen) + ')' +
+       ' WHERE LENGTH(' + QuoteIdentifier(ColumnInfo.ColumnName) + ') > ' +
+                          IntToStr(MaxLen) + ';' +
+       sLineBreak;
+  end;
+  if SameText(ColumnInfo.IsNullable, 'NO') then
+  begin
+     SanitizeSQL := SanitizeSQL +
+       'UPDATE ' + QuoteIdentifier(TableName) +
+       ' SET ' + QuoteIdentifier(ColumnInfo.ColumnName) + ' = ''''' +
+       ' WHERE ' + QuoteIdentifier(ColumnInfo.ColumnName) + ' IS NULL;' +
+       sLineBreak;
+  end;
+  Result := SanitizeSQL +
+            'ALTER TABLE ' + QuoteIdentifier(TableName) +
+            ' MODIFY COLUMN ' + GenerateColumnDefinition(ColumnInfo) + ';';
 end;
-
 
 end.
