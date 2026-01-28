@@ -101,11 +101,9 @@ var
   // Variables eliminadas: i, PKList, ColDef (ya no hacen falta aquí)
 begin
   FWriter.AddComment(TRes.MsgNewTable + TableName);
-
   // 1. Obtener la estructura y los índices desde el Origen
   Table := FSourceDB.GetTableStructure(TableName);
   Indexes := FSourceDB.GetTableIndexes(TableName);
-
   try
     // -----------------------------------------------------------------------
     // CORRECCIÓN: Delegar al Provider (MySQL, Firebird, etc)
@@ -113,7 +111,6 @@ begin
     // En lugar de construir el string manualmente aquí, llamamos a la interfaz.
     // Esto ejecutará TMySQLHelpers.GenerateCreateTableSQL
     FWriter.AddCommand(FHelpers.GenerateCreateTableSQL(Table, Indexes));
-
     // -----------------------------------------------------------------------
     // 3. Crear índices secundarios (No Primary Key)
     // -----------------------------------------------------------------------
@@ -129,7 +126,6 @@ begin
         FWriter.AddCommand(FHelpers.GenerateIndexDefinition(TableName, Idx));
       end;
     end;
-
   finally
     Table.Free;
     // Indexes es un array dinámico gestionado automáticamente por el compilador,
@@ -156,6 +152,7 @@ procedure TDBComparerEngine.CompareTables;
 var
   SourceTables, TargetTables: TStringList;
   i: Integer;
+  SkipTable: Boolean;
 begin
   SourceTables := FSourceDB.GetTables;
   TargetTables := FTargetDB.GetTables;
@@ -175,6 +172,14 @@ begin
     // 2. Tablas nuevas o modificadas
     for i := 0 to SourceTables.Count - 1 do
     begin
+      SkipTable := False;
+      if (FOptions.IncludeTables.Count > 0) and
+         (FOptions.IncludeTables.IndexOf(SourceTables[i]) = -1) then
+        SkipTable := True;
+      if (FOptions.ExcludeTables.IndexOf(SourceTables[i]) >= 0) then
+        SkipTable := True;
+      if SkipTable then
+        Continue;
       if TargetTables.IndexOf(SourceTables[i]) = -1 then
       begin
         // Tabla nueva - Crear completa

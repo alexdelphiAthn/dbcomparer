@@ -45,23 +45,24 @@ begin
   Result := TStringList.Create;
 end;
 
-function TMySQLMetadataProvider.GetData(const TableName: string; const Filter: string = ''): TDataSet;
+function TMySQLMetadataProvider.GetData(const TableName: string;
+                                        const Filter: string = ''): TDataSet;
 var
   Query: TUniQuery;
   function QuoteIdentifier(const Identifier: string): string;
-begin
-  Result := '`' + Identifier + '`';
-end;
+  begin
+    Result := '`' + Identifier + '`';
+  end;
 begin
   Query := TUniQuery.Create(nil);
   Query.Connection := FConn;
+  FConn.Database := FDBName;
   Query.SQL.Text := 'SELECT * FROM ' + QuoteIdentifier(TableName);
   if Filter <> '' then
     Query.SQL.Add('WHERE ' + Filter);
   Query.Open;
-  Result := Query; // El Engine será responsable de liberarlo
+  Result := Query;
 end;
-
 
 function TMySQLMetadataProvider.GetFunctionDefinition(
   const FunctionName: string): string;
@@ -267,10 +268,8 @@ begin
   Result := TTableInfo.Create;
   Result.TableName := TableName;
   Query := TUniQuery.Create(nil);
-
   try
     Query.Connection := FConn;
-
     // 2. Consulta a INFORMATION_SCHEMA optimizada y parametrizada
     Query.SQL.Text := 'SELECT COLUMN_NAME, ' +
                       '       COLUMN_TYPE, ' +
@@ -284,27 +283,22 @@ begin
                       ' WHERE TABLE_SCHEMA = :DbName ' +
                       '   AND TABLE_NAME = :TbName ' +
                       ' ORDER BY ORDINAL_POSITION';
-
     // Asignamos los parámetros para seguridad y robustez
     Query.ParamByName('DbName').AsString := FDBName;
     Query.ParamByName('TbName').AsString := TableName;
-
     Query.Open;
-
     // 3. Iteramos por las columnas encontradas
     while not Query.Eof do
     begin
       // IMPORTANTE: Si TColumnInfo es una CLASE, descomenta la línea de abajo.
       // Si es un RECORD, déjala comentada.
       // Col := TColumnInfo.Create;
-
       // Lectura de campos básicos
       Col.ColumnName := Query.FieldByName('COLUMN_NAME').AsString;
       Col.DataType   := Query.FieldByName('COLUMN_TYPE').AsString;
       Col.IsNullable := Query.FieldByName('IS_NULLABLE').AsString; // 'YES' o 'NO'
       Col.ColumnKey  := Query.FieldByName('COLUMN_KEY').AsString;  // 'PRI', 'UNI', etc.
       Col.Extra      := Query.FieldByName('EXTRA').AsString;       // 'auto_increment', etc.
-
       // --- Lógica CRÍTICA para el Valor por Defecto (Solución Error 1067) ---
       if Query.FieldByName('COLUMN_DEFAULT').IsNull then
       begin
@@ -317,25 +311,20 @@ begin
         // Si tiene un valor real (incluso cadena vacía ''), lo tomamos tal cual.
         Col.ColumnDefault := Query.FieldByName('COLUMN_DEFAULT').AsString;
       end;
-
       // Manejo de longitud máxima
       if not Query.FieldByName('CHARACTER_MAXIMUM_LENGTH').IsNull then
         Col.CharMaxLength := Query.FieldByName('CHARACTER_MAXIMUM_LENGTH').AsString
       else
         Col.CharMaxLength := '0';
-
       // Manejo de comentarios
       if not Query.FieldByName('COLUMN_COMMENT').IsNull then
         Col.ColumnComment := Query.FieldByName('COLUMN_COMMENT').AsString
       else
         Col.ColumnComment := '';
-
       // Agregamos la columna a la lista
       Result.Columns.Add(Col);
-
       Query.Next;
     end;
-
   finally
     Query.Free;
   end;
