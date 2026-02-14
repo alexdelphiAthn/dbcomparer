@@ -9,7 +9,7 @@ type
   TDBComparerEngine = class
   private
     FSourceDB: IDBMetadataProvider;
-    FTargetDB: IDBMetadataProvider; 
+    FTargetDB: IDBMetadataProvider;
     FWriter: IScriptWriter;
     FOptions: TComparerOptions;
     FHelpers: IDBHelpers;
@@ -57,7 +57,7 @@ var
 begin
   // Obtenemos listas de ambos lados
   SourceSeqs := FSourceDB.GetSequences;
-  TargetSeqs := FTargetDB.GetSequences; 
+  TargetSeqs := FTargetDB.GetSequences;
   try
     // Normalizamos para comparaciones (opcional, pero recomendado)
     SourceSeqs.CaseSensitive := False;
@@ -184,6 +184,9 @@ begin
       begin
         // Tabla nueva - Crear completa
         CreateNewTable(SourceTables[i]);
+        // Si hay opción de copiar datos, lo hacemos inmediatamente
+        if FOptions.WithData or FOptions.WithDataDiff then
+          CopyAllData(SourceTables[i]);
       end
       else
       begin
@@ -205,16 +208,15 @@ begin
            SkipData := True;
          if not SkipData then
          begin
-           if FOptions.WithData then
-             CopyAllData(SourceTables[i])
-           else if FOptions.WithDataDiff then
+           // Solo procesamos aquí las tablas que ya existían en ambos lados
+           if TargetTables.IndexOf(SourceTables[i]) > -1 then
            begin
-             // Solo comparamos si la tabla existe en ambos lados, si es nueva
-             // ya se habría creado vacía, así que podríamos llenarla,
-             // pero WithDataDiff asume sincronización.
-             if TargetTables.IndexOf(SourceTables[i]) > -1 then
+             if FOptions.WithData then
+               CopyAllData(SourceTables[i])
+             else if FOptions.WithDataDiff then
                CompareData(SourceTables[i]);
            end;
+           // Las tablas nuevas ya se procesaron arriba, junto con CreateNewTable
          end;
        end;
     end;
