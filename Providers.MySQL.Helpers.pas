@@ -51,24 +51,49 @@ function TMySQLHelpers.ValueToSQL(const Field: TField): string;
     for i := Low(Bytes) to High(Bytes) do
       Result := Result + IntToHex(Bytes[i], 2);
   end;
+var
+  InvariantFmt: TFormatSettings;
 begin
   if Field.IsNull then
     Exit('NULL');
+
+  // Configuración invariante: punto decimal, sin separador de miles
+  InvariantFmt := TFormatSettings.Invariant;
+
   case Field.DataType of
     ftString, ftWideString, ftMemo, ftWideMemo, ftFmtMemo:
       Result := QuotedStr(Field.AsString);
+
     ftDate, ftTime, ftDateTime, ftTimeStamp:
-      // MySQL prefiere formato estándar 'YYYY-MM-DD HH:MM:SS'
       Result := QuotedStr(FormatDateTime('yyyy-mm-dd hh:nn:ss', Field.AsDateTime));
+
     ftBoolean:
       Result := IntToStr(Ord(Field.AsBoolean));
+
     ftBlob, ftGraphic, ftVarBytes, ftBytes:
       Result := '0x' + BytesToHex(Field.AsBytes);
+
+    ftSmallint, ftInteger, ftWord, ftLargeint, ftAutoInc:
+      Result := Field.AsString;  // Los enteros no tienen separador decimal
+
+    ftFloat, ftCurrency, ftBCD, ftFMTBcd, ftExtended, ftSingle:
+      // Usar FloatToStr con formato invariante garantiza punto decimal
+      Result := FloatToStr(Field.AsFloat, InvariantFmt);
+
     else
-      // Números y otros
-      Result := Field.AsString;
+      // Para cualquier otro tipo numérico no contemplado arriba,
+      // intentamos con AsFloat primero; si falla, caemos a AsString
+      // y reemplazamos la coma por punto como red de seguridad.
+      begin
+        try
+          Result := FloatToStr(Field.AsFloat, InvariantFmt);
+        except
+          Result := StringReplace(Field.AsString, ',', '.', [rfReplaceAll]);
+        end;
+      end;
   end;
 end;
+
 function TMySQLHelpers.GenerateInsertSQL(const TableName: string;
                            Fields, Values: TStringList;
                            const HasIdentity: Boolean = False): string;
@@ -184,18 +209,29 @@ end;
 
 function TMySQLHelpers.GenerateCreateProcedureSQL(const Body: string): string;
 begin
-  // MySQL necesita cambiar el delimitador para que no corte en el primer ';'
-  Result := 'DELIMITER $$' + sLineBreak +
-            Body + ' $$' + sLineBreak +
+  Result := 'DELIMITER ;;' + sLineBreak +
+            TrimRight(Body) + ' ;;' + sLineBreak +
             'DELIMITER ;';
 end;
 
 function TMySQLHelpers.GenerateCreateFunctionSQL(const Body: string): string;
 begin
-  // Exactamente igual para funciones en MySQL
-  Result := 'DELIMITER $$' + sLineBreak +
-            Body + ' $$' + sLineBreak +
+  Result := 'DELIMITER ;;' + sLineBreak +
+            TrimRight(Body) + ' ;;' + sLineBreak +
             'DELIMITER ;';
+end;
+
+function TMySQLHelpers.GenerateCreateTriggerSQL(const Body: string): string;
+begin
+  Result := 'DELIMITER ;;' + sLineBreak +
+            TrimRight(Body) + ' ;;' + sLineBreak +
+            'DELIMITER ;';
+end;
+
+function TMySQLHelpers.GenerateCreateViewSQL(const Body: string): string;
+begin
+  // Las vistas no necesitan cambiar el delimitador
+  Result := Body + ';';
 end;
 
 function TMySQLHelpers.GenerateCreateTableSQL(const Table: TTableInfo;
@@ -379,3 +415,5 @@ begin
 end;
 
 end.
+
+
