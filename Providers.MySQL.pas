@@ -343,7 +343,7 @@ begin
     Query.SQL.Text := 'SHOW CREATE TRIGGER `' + TriggerName + '`';
     Query.Open;
     Result := Query.Fields[2].AsString;
-    Result := StripDefiner(Result) + ';';
+    Result := StripDefiner(Result);
   finally
     Query.Free;
   end;
@@ -473,3 +473,4 @@ end;
 
 
 end.
+
