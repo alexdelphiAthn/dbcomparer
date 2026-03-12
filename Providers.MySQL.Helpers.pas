@@ -62,7 +62,13 @@ begin
 
   case Field.DataType of
     ftString, ftWideString, ftMemo, ftWideMemo, ftFmtMemo:
-      Result := QuotedStr(Field.AsString);
+      begin
+        // 2. Escapa la barra invertida primero
+        var SafeStr := StringReplace(Field.AsString, '\', '\\', [rfReplaceAll]);
+
+        // 3. QuotedStr se encarga de las comillas simples
+        Result := QuotedStr(SafeStr);
+      end;
 
     ftDate, ftTime, ftDateTime, ftTimeStamp:
       Result := QuotedStr(FormatDateTime('yyyy-mm-dd hh:nn:ss', Field.AsDateTime));
@@ -415,5 +421,6 @@ begin
 end;
 
 end.
+
 
 
