@@ -209,18 +209,29 @@ end;
 
 function TMySQLHelpers.GenerateCreateProcedureSQL(const Body: string): string;
 begin
-  // MySQL necesita cambiar el delimitador para que no corte en el primer ';'
-  Result := 'DELIMITER $$' + sLineBreak +
-            Body + ' $$' + sLineBreak +
+  Result := 'DELIMITER ;;' + sLineBreak +
+            TrimRight(Body) + ' ;;' + sLineBreak +
             'DELIMITER ;';
 end;
 
 function TMySQLHelpers.GenerateCreateFunctionSQL(const Body: string): string;
 begin
-  // Exactamente igual para funciones en MySQL
-  Result := 'DELIMITER $$' + sLineBreak +
-            Body + ' $$' + sLineBreak +
+  Result := 'DELIMITER ;;' + sLineBreak +
+            TrimRight(Body) + ' ;;' + sLineBreak +
             'DELIMITER ;';
+end;
+
+function TMySQLHelpers.GenerateCreateTriggerSQL(const Body: string): string;
+begin
+  Result := 'DELIMITER ;;' + sLineBreak +
+            TrimRight(Body) + ' ;;' + sLineBreak +
+            'DELIMITER ;';
+end;
+
+function TMySQLHelpers.GenerateCreateViewSQL(const Body: string): string;
+begin
+  // Las vistas no necesitan cambiar el delimitador
+  Result := Body + ';';
 end;
 
 function TMySQLHelpers.GenerateCreateTableSQL(const Table: TTableInfo;
@@ -404,4 +415,5 @@ begin
 end;
 
 end.
+
 
