@@ -1,4 +1,4 @@
-unit Core.Types;
+﻿unit Core.Types;
 
 interface
 
@@ -42,6 +42,7 @@ type
     constructor Create;
     destructor Destroy; override;
   end;
+
   TConnectionConfig = record
     Server: string;
     Port: Integer;
@@ -61,7 +62,8 @@ type
     WithDataDiff: Boolean;
     ExcludeTables: TStringList;
     IncludeTables: TStringList;
-
+    ExtendedInsert: Boolean;      // << NUEVO: un INSERT con todos los VALUES
+    ExtendedInsertRows: Integer;
     constructor Create;
     destructor Destroy; override;
 
@@ -106,6 +108,8 @@ var
   Param, Value: string;
 begin
   Result := TComparerOptions.Create;
+  Result.ExtendedInsert := True;
+  Result.ExtendedInsertRows := 500;
   // Empezamos desde 5 porque 1..4 son conexión
   for i := 5 to ParamCount do
   begin
