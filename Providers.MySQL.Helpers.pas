@@ -31,6 +31,8 @@ type
     function ValueToSQL(const Field: TField): string; override;
     function GenerateCreateProcedureSQL(const Body: string): string; override;
     function GenerateCreateFunctionSQL(const Body: string): string; override;
+    function GenerateCreateTriggerSQL(const Body: string): string;
+    function GenerateCreateViewSQL(const Body: string): string;
     function GenerateDeleteSQL(const TableName, WhereClause: string): string; override;
     function GenerateInsertSQL(const TableName: string;
                            Fields, Values: TStringList;
