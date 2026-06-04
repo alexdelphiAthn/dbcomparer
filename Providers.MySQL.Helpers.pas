@@ -168,7 +168,13 @@ function TMySQLHelpers.GenerateAddColumnSQL(const TableName: string;
   const ColumnInfo: TColumnInfo): string;
 begin
   Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
-            ' ADD COLUMN ' + GenerateColumnDefinition(ColumnInfo) + ';';
+            ' ADD COLUMN ' + GenerateColumnDefinition(ColumnInfo);
+  if (Pos('auto_increment', LowerCase(ColumnInfo.Extra)) > 0) and
+     SameText(ColumnInfo.ColumnKey, 'PRI') then
+  begin
+    Result := Result + ', ADD PRIMARY KEY (' + QuoteIdentifier(ColumnInfo.ColumnName) + ')';
+  end;
+  Result := Result + ';';
 end;
 
 function TMySQLHelpers.GenerateColumnDefinition(const Col: TColumnInfo): string;
@@ -369,8 +375,16 @@ begin
           '-- HAVING COUNT(*) > 1' +
         '-- ) AS c' +
       '-- );' + sLineBreak + sLineBreak +
-      'ALTER TABLE ' + QuoteIdentifier(TableName) +
-      ' ADD PRIMARY KEY (' + ColNames + ');';
+      '-- Comprobación dinámica para evitar error si el ADD COLUMN ya creó la PK' + sLineBreak +
+      'SET @pk_exists := (SELECT COUNT(*) FROM information_schema.table_constraints ' +
+      'WHERE table_schema = DATABASE() AND table_name = ' + QuotedStr(TableName) +
+      ' AND constraint_type = ''PRIMARY KEY'');' + sLineBreak +
+      'SET @sql_add := IF(@pk_exists = 0, ' +
+      '''ALTER TABLE ' + QuoteIdentifier(TableName) + ' ADD PRIMARY KEY (' + ColNames + ')'', ' +
+      '''SELECT "Primary Key ya existe"'');' + sLineBreak +
+      'PREPARE stmt FROM @sql_add;' + sLineBreak +
+      'EXECUTE stmt;' + sLineBreak +
+      'DEALLOCATE PREPARE stmt;';
   end
   else if Idx.IsUnique then
   begin
