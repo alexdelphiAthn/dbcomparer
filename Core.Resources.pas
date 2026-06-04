@@ -231,6 +231,8 @@ begin
   // ============================================================================
   else if LangCode = 'fr' then
   begin
+    TRes.OptOutput := 'Enregistre le script généré directement dans un fichier';
+    TRes.OptEncoding := 'Encodage de sortie : utf8bom (défaut), utf8nobom, ansi, unicode';
     TRes.UsageHeader := 'Utilisation :';
     TRes.UsageNotePort := 'Note : Le port par défaut est %d si omis';
     TRes.UsageFormat := '      Pour spécifier le schéma : base\schéma (par défaut : public)';
@@ -320,6 +322,8 @@ begin
   // ============================================================================
   else if LangCode = 'de' then
   begin
+    TRes.OptOutput := 'Speichert das generierte Skript direkt in einer Datei';
+    TRes.OptEncoding := 'Ausgabe-Kodierung: utf8bom (Standard), utf8nobom, ansi, unicode';
     TRes.UsageHeader := 'Verwendung:';
     TRes.UsageNotePort := 'Hinweis: Standardport ist %d, wenn nicht angegeben';
     TRes.UsageFormat := '      Um Schema anzugeben: datenbank\schema (Standard: public)';
@@ -409,6 +413,8 @@ begin
   // ============================================================================
   else if LangCode = 'zh' then
   begin
+    TRes.OptOutput := '将生成的脚本直接保存到文件中';
+    TRes.OptEncoding := '输出编码：utf8bom（默认）、utf8nobom、ansi、unicode';
     TRes.UsageHeader := '用法：';
     TRes.UsageNotePort := '注意：如果省略，默认端口为 %d';
     TRes.UsageFormat := '      指定模式：数据库\模式（默认：public）';
@@ -498,6 +504,8 @@ begin
   // ============================================================================
   else if LangCode = 'ko' then
   begin
+    TRes.OptOutput := '생성된 스크립트를 파일로 직접 저장합니다';
+    TRes.OptEncoding := '출력 인코딩: utf8bom (기본값), utf8nobom, ansi, unicode';
     TRes.UsageHeader := '사용법:';
     TRes.UsageNotePort := '참고: 생략 시 기본 포트는 %d입니다';
     TRes.UsageFormat := '      스키마 지정: 데이터베이스\스키마 (기본값: public)';
@@ -587,6 +595,8 @@ begin
   // ============================================================================
   else if LangCode = 'ar' then
   begin
+    TRes.OptOutput := 'يحفظ البرنامج النصي الذي تم إنشاؤه مباشرة في ملف';
+    TRes.OptEncoding := 'ترميز الإخراج: utf8bom (الافتراضي)، utf8nobom، ansi، unicode';
     TRes.UsageHeader := 'الاستخدام:';
     TRes.UsageNotePort := 'ملاحظة: المنفذ الافتراضي هو %d إذا تم حذفه';
     TRes.UsageFormat := '      لتحديد المخطط: قاعدة_البيانات\المخطط (الافتراضي: public)';
@@ -676,6 +686,8 @@ begin
   // ============================================================================
   else if LangCode = 'hr' then
   begin
+    TRes.OptOutput := 'Sprema generiranu skriptu izravno u datoteku';
+    TRes.OptEncoding := 'Izlazno kodiranje: utf8bom (zadano), utf8nobom, ansi, unicode';
     TRes.UsageHeader := 'Upotreba:';
     TRes.UsageNotePort := 'Napomena: Zadani port je %d ako se izostavi';
     TRes.UsageFormat := '      Za određivanje sheme: baza\shema (zadano: public)';
@@ -765,6 +777,8 @@ begin
   // ============================================================================
   else
   begin
+    TRes.OptOutput := 'Save the generated script directly to a file';
+    TRes.OptEncoding := 'Output encoding: utf8bom (default), utf8nobom, ansi, unicode';
     TRes.UsageHeader := 'Usage:';
     TRes.UsageNotePort := 'Note: Default port is %d if omitted';
     TRes.UsageFormat := '      To specify schema: database\schema (default: public)';
