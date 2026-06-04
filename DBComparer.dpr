@@ -31,8 +31,8 @@ begin
   Writeln('  --encoding=formato         ' + TRes.OptEncoding);
   Writeln('');
   Writeln(TRes.ExamplesHeader);
-  Writeln('  DBComparer localhost:3306\origin_prod root\pass123 '+
-          'localhost:3306\destiny_dev root\pass456 --nodelete --with-triggers');
+  Writeln('  DBComparer localhost:3306\origin_dev root\pass123 '+
+          'localhost:3306\destiny_prod root\pass456 --nodelete --with-triggers');
   Writeln('');
   Writeln('  DBComparer localhost:3306\dev root\pass '+
           'localhost:3306\prod root\pass --with-data-diff --nodelete');
