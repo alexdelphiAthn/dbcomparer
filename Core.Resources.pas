@@ -102,6 +102,10 @@ type
     class var ExPGSchema: string;
     class var ExPGSimple: string;
     class var ExPGFilter: string;
+
+    // En la clase TRes (interface) añade:
+    class var OptOutput: string;
+    class var OptEncoding: string;
   end;
 
 implementation
@@ -219,6 +223,8 @@ begin
                        'servidor2:5432\midb\test_schema usuario\pass --with-data-diff --nodelete';
     TRes.ExPGSimple := '  %s localhost\midb postgres\pass localhost\midb_test postgres\pass --with-data-diff';
     TRes.ExPGFilter := '  %s ... --with-data-diff --include-tables=clientes,productos';
+    TRes.OptOutput := 'Guarda el script generado directamente en un archivo';
+    TRes.OptEncoding := 'Codificación de salida: utf8bom (defecto), utf8nobom, ansi, unicode';
   end
   // ============================================================================
   // FRANÇAIS

@@ -62,13 +62,17 @@ type
     WithDataDiff: Boolean;
     ExcludeTables: TStringList;
     IncludeTables: TStringList;
-    ExtendedInsert: Boolean;      // << NUEVO: un INSERT con todos los VALUES
+    ExtendedInsert: Boolean;
     ExtendedInsertRows: Integer;
+
+    OutputFile: string;
+    OutputEncoding: string;
+
+    class function ParseFromCLI: TComparerOptions;
+
     constructor Create;
     destructor Destroy; override;
 
-    // MÉTODO ELEGANTE: La clase sabe cómo crearse a sí misma desde la consola
-    class function ParseFromCLI: TComparerOptions;
   end;
 
 implementation
@@ -110,6 +114,7 @@ begin
   Result := TComparerOptions.Create;
   Result.ExtendedInsert := True;
   Result.ExtendedInsertRows := 500;
+  Result.OutputEncoding := 'utf8bom';
   // Empezamos desde 5 porque 1..4 son conexión
   for i := 5 to ParamCount do
   begin
@@ -118,19 +123,21 @@ begin
       Result.NoDelete := True
     else if Param = '--with-triggers' then
       Result.WithTriggers := True
-    else if Param = '--with-data' then
-      Result.WithData := True
-    else if Param = '--with-data-diff' then
-      Result.WithDataDiff := True
-    else if StartsText('--exclude-tables=', Param) then
-    begin
-      Value := Copy(ParamStr(i), Length('--exclude-tables=') + 1, MaxInt);
-      Result.ExcludeTables.CommaText := Value;
-    end
+    // ... mantienes tus otros else if ...
     else if StartsText('--include-tables=', Param) then
     begin
       Value := Copy(ParamStr(i), Length('--include-tables=') + 1, MaxInt);
       Result.IncludeTables.CommaText := Value;
+    end
+    // --- NUEVOS PARÁMETROS ---
+    else if StartsText('--output=', Param) then
+    begin
+      Result.OutputFile := Copy(ParamStr(i), Length('--output=') + 1, MaxInt);
+    end
+    else if StartsText('--encoding=', Param) then
+    begin
+      Result.OutputEncoding := LowerCase(Copy(ParamStr(i),
+                                         Length('--encoding=') + 1, MaxInt));
     end;
   end;
   // Validación básica

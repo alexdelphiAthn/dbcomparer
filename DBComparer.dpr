@@ -10,6 +10,7 @@ uses
   ScriptWriters in 'ScriptWriters.pas',
   Providers.MySQL.Helpers in 'Providers.MySQL.Helpers.pas',
   System.SysUtils,
+  System.IOUtils,
   Core.Resources in 'Core.Resources.pas';
 
 procedure ShowUsage;
@@ -26,6 +27,8 @@ begin
   Writeln('                            ' + TRes.OptExcludeDesc);
   Writeln('  --include-tables=T1,T2...  '+ TRes.OptInclude);
   Writeln('                             '+ TRes.OptIncludeDesc);
+  Writeln('  --output=archivo.sql       ' + TRes.OptOutput);
+  Writeln('  --encoding=formato         ' + TRes.OptEncoding);
   Writeln('');
   Writeln(TRes.ExamplesHeader);
   Writeln('  DBComparer localhost:3306\origin_prod root\pass123 '+
@@ -94,7 +97,37 @@ begin
                                          Options);
       try
         Engine.GenerateScript;
-        Writeln(Writer.GetScript);
+        if Options.OutputFile <> '' then
+        begin
+          var MyEncoding: TEncoding;
+          var FreeEncoding: Boolean := False;
+          if Options.OutputEncoding = 'ansi' then
+            MyEncoding := TEncoding.ANSI
+          else if Options.OutputEncoding = 'unicode' then
+            MyEncoding := TEncoding.Unicode
+          else if Options.OutputEncoding = 'utf8nobom' then
+          begin
+            MyEncoding := TUTF8Encoding.Create(False); // UTF8 sin BOM
+            FreeEncoding := True;
+          end
+          else
+            MyEncoding := TEncoding.UTF8; // Por defecto es UTF-8 con BOM
+          try
+            TFile.WriteAllText(Options.OutputFile, Writer.GetScript,
+                               MyEncoding);
+            Writeln('Script generado exitosamente y guardado en: ',
+                     Options.OutputFile);
+          finally
+            if FreeEncoding then
+              MyEncoding.Free;
+          end;
+        end
+        else
+        begin
+          // Si no se pasó --output, se imprime en consola
+          Writeln(Writer.GetScript);
+        end;
+
       finally
         Engine.Free;
       end;
