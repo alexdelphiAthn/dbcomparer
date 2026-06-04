@@ -49,6 +49,7 @@ function TDBHelpers.NormalizeExtra(const AExtra: string): string;
 begin
   Result := LowerCase(Trim(AExtra));
 end;
+
 function TDBHelpers.ColumnsAreEqual(const Col1, Col2: TColumnInfo): Boolean;
 var
   Typ1, Typ2, Null1, Null2, Key1, Key2, Extra1, Extra2, Def1, Def2: string;
@@ -64,22 +65,37 @@ begin
   Extra2 := NormalizeExtra(Col2.Extra);
   Def1 := Trim(Col1.ColumnDefault);
   Def2 := Trim(Col2.ColumnDefault);
-  Result := (Typ1 = Typ2) and (Null1 = Null2) and
-            (Key1 = Key2) and (Extra1 = Extra2);
+  if SameText(Def1, '<NULL>') or SameText(Def1, 'NULL') then Def1 := '';
+  if SameText(Def2, '<NULL>') or SameText(Def2, 'NULL') then Def2 := '';
+  Result := (Typ1 = Typ2) and (Null1 = Null2) and (Extra1 = Extra2);
   if Result then
   begin
     IsAutoInc := (Pos('auto_increment', Extra1) > 0) or
                  (Pos('auto_increment', Extra2) > 0);
     if not IsAutoInc then
     begin
-      if SameText(Def1, 'NULL') then Def1 := '';
-      if SameText(Def2, 'NULL') then Def2 := '';
       if not SameText(Def1, Def2) then
         Result := False;
     end;
   end;
   if Result then
     Result := SameText(Col1.ColumnComment, Col2.ColumnComment);
+  // Depurador ampliado (ahora captura absolutamente todo lo que puede fallar)
+  if not Result then
+  begin
+    Writeln(ErrOutput, '  [!] Dif en Columna: ', Col1.ColumnName);
+    if Typ1 <> Typ2 then
+      Writeln(ErrOutput, '      - Tipo: [', Typ1, '] vs [', Typ2, ']');
+    if Null1 <> Null2 then
+      Writeln(ErrOutput, '      - Null: [', Null1, '] vs [', Null2, ']');
+    if Extra1 <> Extra2 then
+      Writeln(ErrOutput, '      - Extra:[', Extra1, '] vs [', Extra2, ']');
+    if Def1 <> Def2 then
+      Writeln(ErrOutput, '      - Def:  [', Def1, '] vs [', Def2, ']');
+    if not SameText(Col1.ColumnComment, Col2.ColumnComment) then
+      Writeln(ErrOutput, '      - Coment: [', Col1.ColumnComment, '] vs [',
+                                                       Col2.ColumnComment, ']');
+  end;
 end;
 
 function TDBHelpers.IndexesAreEqual(const Idx1, Idx2: TIndexInfo): Boolean;
