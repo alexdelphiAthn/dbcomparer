@@ -22,6 +22,9 @@ type
     procedure CreateNewTable(const TableName: string);
     procedure CompareData(const TableName: string);
     procedure CopyAllData(const TableName: string);
+    function SortViewsByDependencies(const SourceViews: TStringList;
+      const ViewDefinitions: TDictionary<string, string>): TStringList;
+    function ViewDefinitionReferences(const Definition, ViewName: string): Boolean;
     function BuildWhereClause(const PKCols: TStringList; DataSet: TDataSet): string;
   public
     constructor Create(Source, Target: IDBMetadataProvider;
@@ -365,24 +368,136 @@ begin
 end;
 procedure TDBComparerEngine.CompareViews;
 var
-  SourceViews: TStringList;
+  SourceViews, SortedViews: TStringList;
+  ViewDefinitions: TDictionary<string, string>;
+  ViewDefinition: string;
   i: Integer;
 begin
   SourceViews := FSourceDB.GetViews;
+  ViewDefinitions := TDictionary<string, string>.Create;
   try
-    FWriter.AddComment(TRes.MsgHeaderViews);
     for i := 0 to SourceViews.Count - 1 do
     begin
-      FWriter.AddComment(TRes.MsgRecreateView + SourceViews[i]);
-      // MySQL suele requerir DROP antes de create si cambia la definición
-      FWriter.AddCommand(FHelpers.GenerateDropView(SourceViews[i]));
-      FWriter.AddCommand(FSourceDB.GetViewDefinition(SourceViews[i]));
+      ViewDefinition := FSourceDB.GetViewDefinition(SourceViews[i]);
+      ViewDefinitions.AddOrSetValue(LowerCase(SourceViews[i]), ViewDefinition);
+    end;
+    SortedViews := SortViewsByDependencies(SourceViews, ViewDefinitions);
+    try
+      FWriter.AddComment(TRes.MsgHeaderViews);
+      // Primero se borran las dependientes y despues sus dependencias.
+      for i := SortedViews.Count - 1 downto 0 do
+        FWriter.AddCommand(FHelpers.GenerateDropView(SortedViews[i]));
+      // Para crear, cada dependencia debe existir antes que quien la usa.
+      for i := 0 to SortedViews.Count - 1 do
+      begin
+        FWriter.AddComment(TRes.MsgRecreateView + SortedViews[i]);
+        if ViewDefinitions.TryGetValue(LowerCase(SortedViews[i]),
+                                       ViewDefinition) then
+          FWriter.AddCommand(ViewDefinition);
+      end;
+    finally
+      SortedViews.Free;
     end;
   finally
+    ViewDefinitions.Free;
     SourceViews.Free;
   end;
 end;
-// En uses añadir: Data.DB
+
+function TDBComparerEngine.SortViewsByDependencies(
+  const SourceViews: TStringList;
+  const ViewDefinitions: TDictionary<string, string>): TStringList;
+var
+  VisitState: TDictionary<string, Integer>;
+
+  procedure VisitView(const ViewName: string);
+  var
+    State: Integer;
+    Key: string;
+    Definition: string;
+    i: Integer;
+    DependencyName: string;
+  begin
+    Key := LowerCase(ViewName);
+    if VisitState.TryGetValue(Key, State) then
+    begin
+      if State <> 0 then
+        Exit;
+    end;
+    VisitState.AddOrSetValue(Key, 1);
+    if ViewDefinitions.TryGetValue(Key, Definition) then
+    begin
+      for i := 0 to SourceViews.Count - 1 do
+      begin
+        DependencyName := SourceViews[i];
+        if not SameText(DependencyName, ViewName) and
+           ViewDefinitionReferences(Definition, DependencyName) then
+          VisitView(DependencyName);
+      end;
+    end;
+    VisitState.AddOrSetValue(Key, 2);
+    if Result.IndexOf(ViewName) = -1 then
+      Result.Add(ViewName);
+  end;
+
+var
+  i: Integer;
+begin
+  Result := TStringList.Create;
+  Result.CaseSensitive := False;
+  VisitState := TDictionary<string, Integer>.Create;
+  try
+    for i := 0 to SourceViews.Count - 1 do
+      VisitView(SourceViews[i]);
+  finally
+    VisitState.Free;
+  end;
+end;
+
+function TDBComparerEngine.ViewDefinitionReferences(
+  const Definition, ViewName: string): Boolean;
+var
+  LowerDefinition, LowerViewName: string;
+  FoundPos, AfterPos: Integer;
+
+  function IsIdentifierChar(const Value: Char): Boolean;
+  begin
+    Result := CharInSet(Value, ['A'..'Z', 'a'..'z', '0'..'9', '_', '$']);
+  end;
+
+  function ContainsQuotedView(const OpenQuote, CloseQuote: Char): Boolean;
+  begin
+    Result := Pos(string(OpenQuote) + LowerViewName + string(CloseQuote),
+                  LowerDefinition) > 0;
+  end;
+
+begin
+  Result := False;
+  LowerDefinition := LowerCase(Definition);
+  LowerViewName := LowerCase(ViewName);
+  if ContainsQuotedView('`', '`') or
+     ContainsQuotedView('"', '"') or
+     ContainsQuotedView('[', ']') then
+  begin
+    Result := True;
+    Exit;
+  end;
+  FoundPos := Pos(LowerViewName, LowerDefinition);
+  while FoundPos > 0 do
+  begin
+    AfterPos := FoundPos + Length(LowerViewName);
+    if ((FoundPos = 1) or
+        not IsIdentifierChar(LowerDefinition[FoundPos - 1])) and
+       ((AfterPos > Length(LowerDefinition)) or
+        not IsIdentifierChar(LowerDefinition[AfterPos])) then
+    begin
+      Result := True;
+      Exit;
+    end;
+    FoundPos := PosEx(LowerViewName, LowerDefinition, FoundPos + 1);
+  end;
+end;
+
 procedure TDBComparerEngine.CopyAllData(const TableName: string);
 var
   SourceData: TDataSet;
