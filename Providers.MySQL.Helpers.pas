@@ -3,6 +3,9 @@
 interface
 uses Core.Helpers, Core.Types, System.SysUtils, System.StrUtils,
   System.Classes, Data.DB, Uni;
+
+function NormalizeMariaDB10SQLText(const SQL: string): string;
+
 type
   TMySQLHelpers = class(TDBHelpers)
   private
@@ -52,6 +55,85 @@ implementation
 
 // Añadir en uses: Data.DB, System.SysUtils, System.Classes, System.StrUtils
 
+function AddUtf8mb4CastCollations(const SQL: string): string;
+var
+  I, J, K, Depth: Integer;
+  Inner: string;
+  QuoteChar: Char;
+begin
+  Result := SQL;
+  I := 1;
+  while I <= Length(Result) - 4 do
+  begin
+    if not SameText(Copy(Result, I, 5), 'CAST(') then
+    begin
+      Inc(I);
+      Continue;
+    end;
+    J := I + 5;
+    Depth := 1;
+    QuoteChar := #0;
+    while (J <= Length(Result)) and (Depth > 0) do
+    begin
+      if QuoteChar <> #0 then
+      begin
+        if (Result[J] = QuoteChar) then
+        begin
+          if (J < Length(Result)) and (Result[J + 1] = QuoteChar) then
+            Inc(J)
+          else
+            QuoteChar := #0;
+        end
+        else if (Result[J] = '\') and (J < Length(Result)) then
+          Inc(J);
+      end
+      else
+      begin
+        if CharInSet(Result[J], ['''', '"', '`']) then
+          QuoteChar := Result[J]
+        else if Result[J] = '(' then
+          Inc(Depth)
+        else if Result[J] = ')' then
+          Dec(Depth);
+      end;
+      Inc(J);
+    end;
+    if Depth <> 0 then
+      Break;
+    Dec(J);
+    Inner := Trim(Copy(Result, I + 5, J - I - 5));
+    if EndsText(' AS CHAR CHARSET UTF8MB4', Inner) then
+    begin
+      K := J + 1;
+      while (K <= Length(Result)) and CharInSet(Result[K], [' ', #9, #13, #10]) do
+        Inc(K);
+      if not SameText(Copy(Result, K, 7), 'COLLATE') then
+      begin
+        Insert(' COLLATE utf8mb4_spanish_ci', Result, J + 1);
+        I := J + Length(' COLLATE utf8mb4_spanish_ci') + 1;
+        Continue;
+      end;
+    end;
+    I := J + 1;
+  end;
+end;
+
+function NormalizeMariaDB10SQLText(const SQL: string): string;
+begin
+  Result := SQL;
+  Result := StringReplace(Result, 'CURRENT_TIMESTAMP()', 'CURRENT_TIMESTAMP',
+    [rfReplaceAll, rfIgnoreCase]);
+  Result := StringReplace(Result, 'CREATE OR REPLACE TABLE', 'CREATE TABLE',
+    [rfReplaceAll, rfIgnoreCase]);
+  Result := StringReplace(Result, 'utf8mb4_uca1400_ai_ci',
+    'utf8mb4_spanish_ci', [rfReplaceAll, rfIgnoreCase]);
+  Result := StringReplace(Result, 'utf8mb3_uca1400_ai_ci',
+    'utf8_spanish_ci', [rfReplaceAll, rfIgnoreCase]);
+  Result := StringReplace(Result, 'utf8mb3', 'utf8',
+    [rfReplaceAll, rfIgnoreCase]);
+  Result := AddUtf8mb4CastCollations(Result);
+end;
+
 constructor TMySQLHelpers.Create(const MariaDB10Compat: Boolean);
 begin
   inherited Create;
@@ -63,16 +145,7 @@ begin
   Result := SQL;
   if not FMariaDB10Compat then
     Exit;
-  Result := StringReplace(Result, 'CURRENT_TIMESTAMP()', 'CURRENT_TIMESTAMP',
-    [rfReplaceAll, rfIgnoreCase]);
-  Result := StringReplace(Result, 'CREATE OR REPLACE TABLE', 'CREATE TABLE',
-    [rfReplaceAll, rfIgnoreCase]);
-  Result := StringReplace(Result, 'utf8mb4_uca1400_ai_ci',
-    'utf8mb4_spanish_ci', [rfReplaceAll, rfIgnoreCase]);
-  Result := StringReplace(Result, 'utf8mb3_uca1400_ai_ci',
-    'utf8_spanish_ci', [rfReplaceAll, rfIgnoreCase]);
-  Result := StringReplace(Result, 'utf8mb3', 'utf8',
-    [rfReplaceAll, rfIgnoreCase]);
+  Result := NormalizeMariaDB10SQLText(Result);
 end;
 
 function TMySQLHelpers.ValueToSQL(const Field: TField): string;

@@ -536,17 +536,7 @@ end;
 function TMySQLMetadataProvider.NormalizeMariaDB10SQL(
   const SQL: string): string;
 begin
-  Result := SQL;
-  Result := StringReplace(Result, 'CURRENT_TIMESTAMP()', 'CURRENT_TIMESTAMP',
-    [rfReplaceAll, rfIgnoreCase]);
-  Result := StringReplace(Result, 'CREATE OR REPLACE TABLE', 'CREATE TABLE',
-    [rfReplaceAll, rfIgnoreCase]);
-  Result := StringReplace(Result, 'utf8mb4_uca1400_ai_ci',
-    'utf8mb4_spanish_ci', [rfReplaceAll, rfIgnoreCase]);
-  Result := StringReplace(Result, 'utf8mb3_uca1400_ai_ci',
-    'utf8_spanish_ci', [rfReplaceAll, rfIgnoreCase]);
-  Result := StringReplace(Result, 'utf8mb3', 'utf8',
-    [rfReplaceAll, rfIgnoreCase]);
+  Result := NormalizeMariaDB10SQLText(SQL);
 end;
 
 
