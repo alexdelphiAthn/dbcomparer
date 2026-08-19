@@ -5,6 +5,9 @@ uses Core.Helpers, Core.Types, System.SysUtils, System.StrUtils,
   System.Classes, Data.DB, Uni;
 type
   TMySQLHelpers = class(TDBHelpers)
+  private
+    function IsGeneratedColumn(const Col: TColumnInfo): Boolean;
+    function GeneratedStorageClause(const Col: TColumnInfo): string;
   public
     function QuoteIdentifier(const Identifier: string): string; override;
     function GenerateColumnDefinition(const Col: TColumnInfo): string; override;
@@ -180,20 +183,25 @@ end;
 function TMySQLHelpers.GenerateColumnDefinition(const Col: TColumnInfo): string;
 var
   DefVal: string;
+  IsGenerated: Boolean;
 begin
   // 1. Definición básica: `Nombre` Tipo
   Result := '`' + Col.ColumnName + '` ' + Col.DataType;
+  IsGenerated := IsGeneratedColumn(Col);
+  if IsGenerated then
+    Result := Result + ' GENERATED ALWAYS AS (' +
+      Trim(Col.GenerationExpression) + ')' + GeneratedStorageClause(Col)
   // 2. Definir NULL o NOT NULL
-  if SameText(Col.IsNullable, 'NO') then
+  else if SameText(Col.IsNullable, 'NO') then
     Result := Result + ' NOT NULL'
   else
     Result := Result + ' NULL';
-  if Col.ColumnDefault = '<NULL>' then
+  if (not IsGenerated) and (Col.ColumnDefault = '<NULL>') then
   begin
     if not SameText(Col.IsNullable, 'NO') then
       Result := Result + ' DEFAULT NULL';
   end
-  else if (Col.ColumnDefault <> '') then
+  else if (not IsGenerated) and (Col.ColumnDefault <> '') then
   begin
     if SameText(Col.ColumnDefault, 'NULL') then
     begin
@@ -213,12 +221,28 @@ begin
       Result := Result + ' DEFAULT ' + QuotedStr(DefVal);
     end;
   end;
-  if Pos('auto_increment', LowerCase(Col.Extra)) > 0 then
+  if (not IsGenerated) and
+     (Pos('auto_increment', LowerCase(Col.Extra)) > 0) then
     Result := Result + ' AUTO_INCREMENT';
-  if Pos('on update', LowerCase(Col.Extra)) > 0 then
+  if (not IsGenerated) and
+     (Pos('on update', LowerCase(Col.Extra)) > 0) then
     Result := Result + ' ON UPDATE CURRENT_TIMESTAMP';
   if not SameText(Col.ColumnComment, '') then
     Result := Result + ' COMMENT ' + QuotedStr(Col.ColumnComment);
+end;
+
+function TMySQLHelpers.GeneratedStorageClause(const Col: TColumnInfo): string;
+begin
+  Result := '';
+  if ContainsText(Col.Extra, 'stored') then
+    Result := ' STORED'
+  else if ContainsText(Col.Extra, 'virtual') then
+    Result := ' VIRTUAL';
+end;
+
+function TMySQLHelpers.IsGeneratedColumn(const Col: TColumnInfo): Boolean;
+begin
+  Result := Trim(Col.GenerationExpression) <> '';
 end;
 
 function TMySQLHelpers.GenerateCreateProcedureSQL(const Body: string): string;
@@ -410,7 +434,8 @@ var
 begin
   SanitizeSQL := '';
   MaxLen := StrToIntDef(ColumnInfo.CharMaxLength, 0);
-  if (MaxLen > 0) and
+  if not IsGeneratedColumn(ColumnInfo) and
+     (MaxLen > 0) and
      (ContainsText(ColumnInfo.DataType, 'char') or
       ContainsText(ColumnInfo.DataType, 'text')) then
   begin
@@ -423,7 +448,8 @@ begin
                           IntToStr(MaxLen) + ';' +
        sLineBreak;
   end;
-  if SameText(ColumnInfo.IsNullable, 'NO') then
+  if not IsGeneratedColumn(ColumnInfo) and
+     SameText(ColumnInfo.IsNullable, 'NO') then
   begin
      SanitizeSQL := SanitizeSQL +
        'UPDATE ' + QuoteIdentifier(TableName) +

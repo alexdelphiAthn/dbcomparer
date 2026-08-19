@@ -276,6 +276,7 @@ begin
                       '       IS_NULLABLE, ' +
                       '       COLUMN_KEY, ' +
                       '       EXTRA, ' +
+                      '       GENERATION_EXPRESSION, ' +
                       '       COLUMN_DEFAULT, ' +
                       '       CHARACTER_MAXIMUM_LENGTH, ' +
                       '       COLUMN_COMMENT ' +
@@ -299,6 +300,8 @@ begin
       Col.IsNullable := Query.FieldByName('IS_NULLABLE').AsString; // 'YES' o 'NO'
       Col.ColumnKey  := Query.FieldByName('COLUMN_KEY').AsString;  // 'PRI', 'UNI', etc.
       Col.Extra      := Query.FieldByName('EXTRA').AsString;       // 'auto_increment', etc.
+      Col.GenerationExpression :=
+        Query.FieldByName('GENERATION_EXPRESSION').AsString;
       // --- Lógica CRÍTICA para el Valor por Defecto (Solución Error 1067) ---
       if Query.FieldByName('COLUMN_DEFAULT').IsNull then
       begin

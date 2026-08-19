@@ -52,7 +52,8 @@ end;
 
 function TDBHelpers.ColumnsAreEqual(const Col1, Col2: TColumnInfo): Boolean;
 var
-  Typ1, Typ2, Null1, Null2, Key1, Key2, Extra1, Extra2, Def1, Def2: string;
+  Typ1, Typ2, Null1, Null2, Key1, Key2, Extra1, Extra2, Def1, Def2,
+  GenerationExpression1, GenerationExpression2: string;
   IsAutoInc: Boolean;
 begin
   Typ1 := NormalizeType(Col1.DataType);
@@ -63,6 +64,8 @@ begin
   Key2 := LowerCase(Trim(Col2.ColumnKey));
   Extra1 := NormalizeExtra(Col1.Extra);
   Extra2 := NormalizeExtra(Col2.Extra);
+  GenerationExpression1 := Trim(Col1.GenerationExpression);
+  GenerationExpression2 := Trim(Col2.GenerationExpression);
   Def1 := Trim(Col1.ColumnDefault);
   Def2 := Trim(Col2.ColumnDefault);
   if SameText(Def1, '<NULL>') or SameText(Def1, 'NULL') then Def1 := '';
@@ -79,6 +82,8 @@ begin
     end;
   end;
   if Result then
+    Result := GenerationExpression1 = GenerationExpression2;
+  if Result then
     Result := SameText(Col1.ColumnComment, Col2.ColumnComment);
   // Depurador ampliado (ahora captura absolutamente todo lo que puede fallar)
   if not Result then
@@ -92,6 +97,9 @@ begin
       Writeln(ErrOutput, '      - Extra:[', Extra1, '] vs [', Extra2, ']');
     if Def1 <> Def2 then
       Writeln(ErrOutput, '      - Def:  [', Def1, '] vs [', Def2, ']');
+    if GenerationExpression1 <> GenerationExpression2 then
+      Writeln(ErrOutput, '      - Exp. generada: [', GenerationExpression1,
+        '] vs [', GenerationExpression2, ']');
     if not SameText(Col1.ColumnComment, Col2.ColumnComment) then
       Writeln(ErrOutput, '      - Coment: [', Col1.ColumnComment, '] vs [',
                                                        Col2.ColumnComment, ']');

@@ -11,6 +11,7 @@ type
     IsNullable: string;
     ColumnKey: string;
     Extra: string;
+    GenerationExpression: string;
     ColumnDefault: string;
     CharMaxLength: string;
     ColumnComment: string;
