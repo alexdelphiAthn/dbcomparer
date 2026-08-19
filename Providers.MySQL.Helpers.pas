@@ -6,9 +6,12 @@ uses Core.Helpers, Core.Types, System.SysUtils, System.StrUtils,
 type
   TMySQLHelpers = class(TDBHelpers)
   private
+    FMariaDB10Compat: Boolean;
     function IsGeneratedColumn(const Col: TColumnInfo): Boolean;
     function GeneratedStorageClause(const Col: TColumnInfo): string;
+    function NormalizeMariaDB10SQL(const SQL: string): string;
   public
+    constructor Create(const MariaDB10Compat: Boolean = False);
     function QuoteIdentifier(const Identifier: string): string; override;
     function GenerateColumnDefinition(const Col: TColumnInfo): string; override;
     function GenerateIndexDefinition(const TableName: string;
@@ -34,6 +37,8 @@ type
     function ValueToSQL(const Field: TField): string; override;
     function GenerateCreateProcedureSQL(const Body: string): string; override;
     function GenerateCreateFunctionSQL(const Body: string): string; override;
+    function GenerateCreateSequence(const SeqName: string): string; override;
+    function GenerateDropSequence(const SeqName: string): string; override;
     function GenerateCreateTriggerSQL(const Body: string): string;
     function GenerateCreateViewSQL(const Body: string): string;
     function GenerateDeleteSQL(const TableName, WhereClause: string): string; override;
@@ -46,6 +51,29 @@ type
 implementation
 
 // Añadir en uses: Data.DB, System.SysUtils, System.Classes, System.StrUtils
+
+constructor TMySQLHelpers.Create(const MariaDB10Compat: Boolean);
+begin
+  inherited Create;
+  FMariaDB10Compat := MariaDB10Compat;
+end;
+
+function TMySQLHelpers.NormalizeMariaDB10SQL(const SQL: string): string;
+begin
+  Result := SQL;
+  if not FMariaDB10Compat then
+    Exit;
+  Result := StringReplace(Result, 'CURRENT_TIMESTAMP()', 'CURRENT_TIMESTAMP',
+    [rfReplaceAll, rfIgnoreCase]);
+  Result := StringReplace(Result, 'CREATE OR REPLACE TABLE', 'CREATE TABLE',
+    [rfReplaceAll, rfIgnoreCase]);
+  Result := StringReplace(Result, 'utf8mb4_uca1400_ai_ci',
+    'utf8mb4_spanish_ci', [rfReplaceAll, rfIgnoreCase]);
+  Result := StringReplace(Result, 'utf8mb3_uca1400_ai_ci',
+    'utf8_spanish_ci', [rfReplaceAll, rfIgnoreCase]);
+  Result := StringReplace(Result, 'utf8mb3', 'utf8',
+    [rfReplaceAll, rfIgnoreCase]);
+end;
 
 function TMySQLHelpers.ValueToSQL(const Field: TField): string;
   function BytesToHex(const Bytes: TBytes): string;
@@ -171,8 +199,19 @@ function TMySQLHelpers.GenerateAddColumnSQL(const TableName: string;
   const ColumnInfo: TColumnInfo): string;
 begin
   Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
-            ' ADD COLUMN ' + GenerateColumnDefinition(ColumnInfo);
-  if (Pos('auto_increment', LowerCase(ColumnInfo.Extra)) > 0) and
+            ' ADD COLUMN ';
+  if FMariaDB10Compat then
+    Result := Result + 'IF NOT EXISTS ';
+  Result := Result + GenerateColumnDefinition(ColumnInfo);
+  if FMariaDB10Compat then
+  begin
+    if ColumnInfo.OrdinalPosition = 1 then
+      Result := Result + ' FIRST'
+    else if ColumnInfo.PreviousColumnName <> '' then
+      Result := Result + ' AFTER ' +
+        QuoteIdentifier(ColumnInfo.PreviousColumnName);
+  end
+  else if (Pos('auto_increment', LowerCase(ColumnInfo.Extra)) > 0) and
      SameText(ColumnInfo.ColumnKey, 'PRI') then
   begin
     Result := Result + ', ADD PRIMARY KEY (' + QuoteIdentifier(ColumnInfo.ColumnName) + ')';
@@ -182,7 +221,7 @@ end;
 
 function TMySQLHelpers.GenerateColumnDefinition(const Col: TColumnInfo): string;
 var
-  DefVal: string;
+  DefVal, DefaultSQL: string;
   IsGenerated: Boolean;
 begin
   // 1. Definición básica: `Nombre` Tipo
@@ -190,7 +229,8 @@ begin
   IsGenerated := IsGeneratedColumn(Col);
   if IsGenerated then
     Result := Result + ' GENERATED ALWAYS AS (' +
-      Trim(Col.GenerationExpression) + ')' + GeneratedStorageClause(Col)
+      NormalizeMariaDB10SQL(Trim(Col.GenerationExpression)) + ')' +
+      GeneratedStorageClause(Col)
   // 2. Definir NULL o NOT NULL
   else if SameText(Col.IsNullable, 'NO') then
     Result := Result + ' NOT NULL'
@@ -210,7 +250,8 @@ begin
     else if (Pos('CURRENT_TIMESTAMP', UpperCase(Col.ColumnDefault)) > 0) or
             (Pos('NOW()', UpperCase(Col.ColumnDefault)) > 0) then
     begin
-      Result := Result + ' DEFAULT ' + Col.ColumnDefault;
+      DefaultSQL := NormalizeMariaDB10SQL(Col.ColumnDefault);
+      Result := Result + ' DEFAULT ' + DefaultSQL;
     end
     else
     begin
@@ -248,21 +289,21 @@ end;
 function TMySQLHelpers.GenerateCreateProcedureSQL(const Body: string): string;
 begin
   Result := 'DELIMITER ;;' + sLineBreak +
-            TrimRight(Body) + ' ;;' + sLineBreak +
+            TrimRight(NormalizeMariaDB10SQL(Body)) + ' ;;' + sLineBreak +
             'DELIMITER ;';
 end;
 
 function TMySQLHelpers.GenerateCreateFunctionSQL(const Body: string): string;
 begin
   Result := 'DELIMITER ;;' + sLineBreak +
-            TrimRight(Body) + ' ;;' + sLineBreak +
+            TrimRight(NormalizeMariaDB10SQL(Body)) + ' ;;' + sLineBreak +
             'DELIMITER ;';
 end;
 
 function TMySQLHelpers.GenerateCreateTriggerSQL(const Body: string): string;
 begin
   Result := 'DELIMITER ;;' + sLineBreak +
-            TrimRight(Body) + ' ;;' + sLineBreak +
+            TrimRight(NormalizeMariaDB10SQL(Body)) + ' ;;' + sLineBreak +
             'DELIMITER ;';
 end;
 
@@ -275,39 +316,95 @@ end;
 function TMySQLHelpers.GenerateCreateTableSQL(const Table: TTableInfo;
   const Indexes: TArray<TIndexInfo>): string;
 var
-  i: Integer;
-  PKList: TStringList;
-  ColDef: string;
-  IsLastColumn: Boolean;
+  i, SeparatorPos: Integer;
+  Definitions, PKList: TStringList;
+  EngineName, TableCollation, CharacterSetName: string;
+
+  function IndexColumnList(const Idx: TIndexInfo): string;
+  var
+    j: Integer;
+  begin
+    Result := '';
+    for j := 0 to High(Idx.Columns) do
+    begin
+      if j > 0 then
+        Result := Result + ', ';
+      Result := Result + QuoteIdentifier(Idx.Columns[j].ColumnName);
+    end;
+  end;
+
 begin
-  Result := 'CREATE TABLE ' + QuoteIdentifier(Table.TableName) + ' (' + sLineBreak;
+  Definitions := TStringList.Create;
   PKList := TStringList.Create;
   try
-    // 1. Recorremos todas las columnas
     for i := 0 to Table.Columns.Count - 1 do
     begin
-      ColDef := '  ' + GenerateColumnDefinition(Table.Columns[i]);
-      // Detectamos si es PK y la guardamos
+      Definitions.Add(GenerateColumnDefinition(Table.Columns[i]));
       if SameText(Table.Columns[i].ColumnKey, 'PRI') then
         PKList.Add(QuoteIdentifier(Table.Columns[i].ColumnName));
-      // Determinamos si es la última columna de la lista
-      IsLastColumn := (i = Table.Columns.Count - 1);
-      // --- CORRECCIÓN DE LA COMA ---
-      // Ponemos coma si NO es la última columna...
-      // ...O si SIENDO la última, tenemos una PK que agregar después.
-      if (not IsLastColumn) or (PKList.Count > 0) then
-      begin
-        ColDef := ColDef + ',';
-      end;
-      Result := Result + ColDef + sLineBreak;
     end;
-    // 2. Agregar PK inline (Ahora la sintaxis será correcta)
-    if PKList.Count > 0 then
-      Result := Result + '  PRIMARY KEY (' + PKList.CommaText + ')' + sLineBreak;
-    Result := Result + ');';
+
+    if FMariaDB10Compat then
+    begin
+      for i := 0 to High(Indexes) do
+      begin
+        if Indexes[i].IsPrimary then
+          Definitions.Add('PRIMARY KEY (' + IndexColumnList(Indexes[i]) + ')')
+        else if Indexes[i].IsUnique then
+          Definitions.Add('UNIQUE KEY ' + QuoteIdentifier(Indexes[i].IndexName) +
+            ' (' + IndexColumnList(Indexes[i]) + ')')
+        else
+          Definitions.Add('KEY ' + QuoteIdentifier(Indexes[i].IndexName) +
+            ' (' + IndexColumnList(Indexes[i]) + ')');
+      end;
+    end;
+    if (not FMariaDB10Compat) and (PKList.Count > 0) then
+      Definitions.Add('PRIMARY KEY (' + PKList.CommaText + ')');
+
+    if FMariaDB10Compat then
+      Result := 'CREATE TABLE IF NOT EXISTS '
+    else
+      Result := 'CREATE TABLE ';
+    Result := Result + QuoteIdentifier(Table.TableName) + ' (' + sLineBreak;
+    for i := 0 to Definitions.Count - 1 do
+    begin
+      Result := Result + '  ' + Definitions[i];
+      if i < Definitions.Count - 1 then
+        Result := Result + ',';
+      Result := Result + sLineBreak;
+    end;
+    Result := Result + ')';
+    if FMariaDB10Compat then
+    begin
+      EngineName := Table.Engine;
+      if EngineName = '' then
+        EngineName := 'InnoDB';
+      TableCollation := NormalizeMariaDB10SQL(Table.TableCollation);
+      if TableCollation = '' then
+        TableCollation := 'utf8mb4_spanish_ci';
+      SeparatorPos := Pos('_', TableCollation);
+      if SeparatorPos > 0 then
+        CharacterSetName := Copy(TableCollation, 1, SeparatorPos - 1)
+      else
+        CharacterSetName := 'utf8mb4';
+      Result := Result + ' ENGINE=' + EngineName + ' DEFAULT CHARSET=' +
+        CharacterSetName + ' COLLATE=' + TableCollation;
+    end;
+    Result := Result + ';';
   finally
+    Definitions.Free;
     PKList.Free;
   end;
+end;
+
+function TMySQLHelpers.GenerateCreateSequence(const SeqName: string): string;
+begin
+  Result := '';
+end;
+
+function TMySQLHelpers.GenerateDropSequence(const SeqName: string): string;
+begin
+  Result := '';
 end;
 
 function TMySQLHelpers.GenerateDeleteSQL(const TableName,
@@ -414,14 +511,20 @@ begin
   begin
     // Aplicamos la misma lógica para índices únicos
     Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
-              ' ADD UNIQUE INDEX ' + QuoteIdentifier(Idx.IndexName) +
+              ' ADD UNIQUE INDEX ';
+    if FMariaDB10Compat then
+      Result := Result + 'IF NOT EXISTS ';
+    Result := Result + QuoteIdentifier(Idx.IndexName) +
               ' (' + ColNames + ');';
   end
   else
   begin
     // Índices normales (no requieren unicidad)
     Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
-              ' ADD INDEX ' + QuoteIdentifier(Idx.IndexName) +
+              ' ADD INDEX ';
+    if FMariaDB10Compat then
+      Result := Result + 'IF NOT EXISTS ';
+    Result := Result + QuoteIdentifier(Idx.IndexName) +
               ' (' + ColNames + ');';
   end;
 end;
@@ -459,7 +562,16 @@ begin
   end;
   Result := SanitizeSQL +
             'ALTER TABLE ' + QuoteIdentifier(TableName) +
-            ' MODIFY COLUMN ' + GenerateColumnDefinition(ColumnInfo) + ';';
+            ' MODIFY COLUMN ' + GenerateColumnDefinition(ColumnInfo);
+  if FMariaDB10Compat then
+  begin
+    if ColumnInfo.OrdinalPosition = 1 then
+      Result := Result + ' FIRST'
+    else if ColumnInfo.PreviousColumnName <> '' then
+      Result := Result + ' AFTER ' +
+        QuoteIdentifier(ColumnInfo.PreviousColumnName);
+  end;
+  Result := Result + ';';
 end;
 
 end.

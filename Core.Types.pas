@@ -12,6 +12,8 @@ type
     ColumnKey: string;
     Extra: string;
     GenerationExpression: string;
+    OrdinalPosition: Integer;
+    PreviousColumnName: string;
     ColumnDefault: string;
     CharMaxLength: string;
     ColumnComment: string;
@@ -39,6 +41,8 @@ type
 
   TTableInfo = class
     TableName: string;
+    Engine: string;
+    TableCollation: string;
     Columns: TList<TColumnInfo>;
     constructor Create;
     destructor Destroy; override;
@@ -63,8 +67,10 @@ type
     WithDataDiff: Boolean;
     ExcludeTables: TStringList;
     IncludeTables: TStringList;
+    PreserveViews: TStringList;
     ExtendedInsert: Boolean;
     ExtendedInsertRows: Integer;
+    MariaDB10Compat: Boolean;
 
     OutputFile: string;
     OutputEncoding: string;
@@ -98,12 +104,15 @@ begin
   ExcludeTables.CaseSensitive := False;
   IncludeTables := TStringList.Create;
   IncludeTables.CaseSensitive := False;
+  PreserveViews := TStringList.Create;
+  PreserveViews.CaseSensitive := False;
 end;
 
 destructor TComparerOptions.Destroy;
 begin
   ExcludeTables.Free;
   IncludeTables.Free;
+  PreserveViews.Free;
   inherited;
 end;
 
@@ -124,11 +133,18 @@ begin
       Result.NoDelete := True
     else if Param = '--with-triggers' then
       Result.WithTriggers := True
+    else if Param = '--mariadb10' then
+      Result.MariaDB10Compat := True
     // ... mantienes tus otros else if ...
     else if StartsText('--include-tables=', Param) then
     begin
       Value := Copy(ParamStr(i), Length('--include-tables=') + 1, MaxInt);
       Result.IncludeTables.CommaText := Value;
+    end
+    else if StartsText('--preserve-views=', Param) then
+    begin
+      Value := Copy(ParamStr(i), Length('--preserve-views=') + 1, MaxInt);
+      Result.PreserveViews.CommaText := Value;
     end
     // --- NUEVOS PARÁMETROS ---
     else if StartsText('--output=', Param) then

@@ -10,12 +10,21 @@ uses
 const
     SCHEMADB = 'information_schema';
 type
-  TMySQLMetadataProvider = class(TInterfacedObject, IDBMetadataProvider)
+  IMySQLRoutineMetadataProvider = interface
+    ['{A5847739-67C3-427C-BE45-EE337BBF6767}']
+    function GetRoutineSQLMode(const RoutineName,
+      RoutineType: string): string;
+  end;
+
+  TMySQLMetadataProvider = class(TInterfacedObject, IDBMetadataProvider,
+    IMySQLRoutineMetadataProvider)
   private
     FConn: TUniConnection;
     FDBName: string;
+    FMariaDB10Compat: Boolean;
   public
-    constructor Create(Conn: TUniConnection; const DBName: string);
+    constructor Create(Conn: TUniConnection; const DBName: string;
+      const MariaDB10Compat: Boolean = False);
     destructor Destroy; override;
     // Implementación de la interfaz
     function GetTables: TStringList;
@@ -30,9 +39,12 @@ type
     function GetSequences:TSTringList;
     function GetProcedureDefinition(const ProcedureName:string):string;
     function GetFunctionDefinition(const FunctionName:string):string;
+    function GetRoutineSQLMode(const RoutineName,
+      RoutineType: string): string;
     function GetData(const TableName: string; const Filter: string = ''): TDataSet;
   private
     function StripDefiner(const SQL: string): string;
+    function NormalizeMariaDB10SQL(const SQL: string): string;
   end;
 
 implementation
@@ -109,10 +121,11 @@ begin
 end;
 
 constructor TMySQLMetadataProvider.Create(Conn: TUniConnection;
-  const DBName: string);
+  const DBName: string; const MariaDB10Compat: Boolean);
 begin
 //  FConn := TUniConnection.Create(nil);
   FDBName := DBName;
+  FMariaDB10Compat := MariaDB10Compat;
   Fconn := Conn;
   FConn.ProviderName := 'MySQL';
   FConn.Connected := True;
@@ -263,6 +276,7 @@ function TMySQLMetadataProvider.GetTableStructure(const TableName: string): TTab
 var
   Query: TUniQuery;
   Col: TColumnInfo;
+  PreviousColumnName: string;
 begin
   // 1. Inicializamos el resultado y la consulta
   Result := TTableInfo.Create;
@@ -277,6 +291,7 @@ begin
                       '       COLUMN_KEY, ' +
                       '       EXTRA, ' +
                       '       GENERATION_EXPRESSION, ' +
+                      '       ORDINAL_POSITION, ' +
                       '       COLUMN_DEFAULT, ' +
                       '       CHARACTER_MAXIMUM_LENGTH, ' +
                       '       COLUMN_COMMENT ' +
@@ -288,9 +303,11 @@ begin
     Query.ParamByName('DbName').AsString := FDBName;
     Query.ParamByName('TbName').AsString := TableName;
     Query.Open;
+    PreviousColumnName := '';
     // 3. Iteramos por las columnas encontradas
     while not Query.Eof do
     begin
+      Col := Default(TColumnInfo);
       // IMPORTANTE: Si TColumnInfo es una CLASE, descomenta la línea de abajo.
       // Si es un RECORD, déjala comentada.
       // Col := TColumnInfo.Create;
@@ -302,6 +319,8 @@ begin
       Col.Extra      := Query.FieldByName('EXTRA').AsString;       // 'auto_increment', etc.
       Col.GenerationExpression :=
         Query.FieldByName('GENERATION_EXPRESSION').AsString;
+      Col.OrdinalPosition := Query.FieldByName('ORDINAL_POSITION').AsInteger;
+      Col.PreviousColumnName := PreviousColumnName;
       // --- Lógica CRÍTICA para el Valor por Defecto (Solución Error 1067) ---
       if Query.FieldByName('COLUMN_DEFAULT').IsNull then
       begin
@@ -326,7 +345,21 @@ begin
         Col.ColumnComment := '';
       // Agregamos la columna a la lista
       Result.Columns.Add(Col);
+      PreviousColumnName := Col.ColumnName;
       Query.Next;
+    end;
+    Query.Close;
+    Query.SQL.Text :=
+      'SELECT ENGINE, TABLE_COLLATION FROM INFORMATION_SCHEMA.TABLES ' +
+      'WHERE TABLE_SCHEMA = :DbName AND TABLE_NAME = :TbName ' +
+      'AND TABLE_TYPE = ''BASE TABLE''';
+    Query.ParamByName('DbName').AsString := FDBName;
+    Query.ParamByName('TbName').AsString := TableName;
+    Query.Open;
+    if not Query.Eof then
+    begin
+      Result.Engine := Query.FieldByName('ENGINE').AsString;
+      Result.TableCollation := Query.FieldByName('TABLE_COLLATION').AsString;
     end;
   finally
     Query.Free;
@@ -472,6 +505,48 @@ begin
                      Copy(Result, PosEnd, Length(Result)));
     end;
   end;
+  if FMariaDB10Compat then
+    Result := NormalizeMariaDB10SQL(Result);
+end;
+
+function TMySQLMetadataProvider.GetRoutineSQLMode(const RoutineName,
+  RoutineType: string): string;
+var
+  Query: TUniQuery;
+begin
+  Result := '';
+  Query := TUniQuery.Create(nil);
+  try
+    Query.Connection := FConn;
+    Query.SQL.Text :=
+      'SELECT SQL_MODE FROM INFORMATION_SCHEMA.ROUTINES ' +
+      'WHERE ROUTINE_SCHEMA = :DbName AND ROUTINE_NAME = :RoutineName ' +
+      'AND ROUTINE_TYPE = :RoutineType';
+    Query.ParamByName('DbName').AsString := FDBName;
+    Query.ParamByName('RoutineName').AsString := RoutineName;
+    Query.ParamByName('RoutineType').AsString := UpperCase(RoutineType);
+    Query.Open;
+    if not Query.Eof then
+      Result := Query.FieldByName('SQL_MODE').AsString;
+  finally
+    Query.Free;
+  end;
+end;
+
+function TMySQLMetadataProvider.NormalizeMariaDB10SQL(
+  const SQL: string): string;
+begin
+  Result := SQL;
+  Result := StringReplace(Result, 'CURRENT_TIMESTAMP()', 'CURRENT_TIMESTAMP',
+    [rfReplaceAll, rfIgnoreCase]);
+  Result := StringReplace(Result, 'CREATE OR REPLACE TABLE', 'CREATE TABLE',
+    [rfReplaceAll, rfIgnoreCase]);
+  Result := StringReplace(Result, 'utf8mb4_uca1400_ai_ci',
+    'utf8mb4_spanish_ci', [rfReplaceAll, rfIgnoreCase]);
+  Result := StringReplace(Result, 'utf8mb3_uca1400_ai_ci',
+    'utf8_spanish_ci', [rfReplaceAll, rfIgnoreCase]);
+  Result := StringReplace(Result, 'utf8mb3', 'utf8',
+    [rfReplaceAll, rfIgnoreCase]);
 end;
 
 

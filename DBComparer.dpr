@@ -21,12 +21,14 @@ begin
   Writeln(TRes.OptionsHeader);
   Writeln('  --nodelete           ' + TRes.OptNoDelete);
   Writeln('  --with-triggers      ' + TRes.OptTriggers);
+  Writeln('  --mariadb10          SQL idempotente compatible con MariaDB 10.2');
   Writeln('  --with-data          ' + TRes.OptWithData);
   Writeln('  --with-data-diff     ' + TRes.OptDataDiff);
   Writeln('  --exclude-tables=T1,T2... ' + TRes.OptExclude);
   Writeln('                            ' + TRes.OptExcludeDesc);
   Writeln('  --include-tables=T1,T2...  '+ TRes.OptInclude);
   Writeln('                             '+ TRes.OptIncludeDesc);
+  Writeln('  --preserve-views=V1,V2...   No reemplazar estas vistas del destino');
   Writeln('  --output=archivo.sql       ' + TRes.OptOutput);
   Writeln('  --encoding=formato         ' + TRes.OptEncoding);
   Writeln('');
@@ -55,6 +57,8 @@ var
   SourceHelpers: IDBHelpers;
 begin
   try
+    SourceConn := nil;
+    TargetConn := nil;
     FormatSettings := TFormatSettings.Create('en-US');
     Set8087CW($133F);
     if (ParamCount < 4) then
@@ -77,7 +81,8 @@ begin
       SourceConn.Username := SourceConfig.Username;
       SourceConn.Password := SourceConfig.Password;
       SourceProvider := TMySQLMetadataProvider.Create(SourceConn,
-                                                      SourceConfig.Database);
+                                                      SourceConfig.Database,
+                                                      Options.MariaDB10Compat);
       TargetConn := TUniConnection.Create(nil);
       TargetConn.ProviderName := 'MySQL';
       TargetConn.Server := TargetConfig.Server;
@@ -85,10 +90,11 @@ begin
       TargetConn.Username := TargetConfig.Username;
       TargetConn.Password := TargetConfig.Password;
       TargetProvider := TMySQLMetadataProvider.Create(TargetConn,
-                                                      TargetConfig.Database);
+                                                      TargetConfig.Database,
+                                                      Options.MariaDB10Compat);
       // 3. Crear escritor
       Writer := TStringListScriptWriter.Create;
-      SourceHelpers := TMySQLHelpers.Create;
+      SourceHelpers := TMySQLHelpers.Create(Options.MariaDB10Compat);
       // 4. Crear e iniciar el motor
       Engine := TDBComparerEngine.Create(SourceProvider,
                                          TargetProvider,
@@ -138,6 +144,9 @@ begin
     end;
   except
     on E: Exception do
+    begin
       Writeln(ErrOutput, 'ERROR: ', E.Message);
+      ExitCode := 1;
+    end;
   end;
 end.
