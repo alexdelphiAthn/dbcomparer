@@ -140,7 +140,6 @@ var
 begin
   SourceConn := nil;
   TargetConn := nil;
-  Options := nil;
   try
     if (ParamCount < 4) then
     begin

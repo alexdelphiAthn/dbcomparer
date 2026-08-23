@@ -266,6 +266,12 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 
 `--with-data` y `--with-data-diff` son mutuamente excluyentes. El primero genera un `INSERT` por cada fila de origen sin compararla con destino. El segundo compara por clave primaria; omite las tablas existentes sin PK y, combinado con `--nodelete`, no genera los `DELETE` de registros sobrantes. Los filtros `--include-tables` y `--exclude-tables` se aplican tanto a la estructura como a los datos de las tablas; si una tabla aparece en ambas listas, prevalece `--exclude-tables`.
 
+### Opciones comunes de vistas y salida
+
+`--preserve-views` omite por completo cada vista indicada: no la elimina, no la recrea y, si falta en destino, no la crea. La comparación de nombres no distingue mayúsculas/minúsculas. Incluye en la lista todas las vistas relacionadas que deban permanecer intactas.
+
+Sin `--output`, el SQL se escribe en la salida estándar. `--encoding` solo controla el archivo creado con `--output`; al redirigir con `>`, la codificación depende de la consola. `unicode` genera UTF-16 LE y `ansi` usa la página de códigos ANSI configurada en Windows.
+
 ### Compatibilidad con MariaDB 10.2
 
 `--mariadb10` es un modo opcional y manual para generar un script más compatible con MariaDB 10.2. Al activarlo, DBComparer:
@@ -280,10 +286,6 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 El modo mejora la idempotencia del DDL de creación, pero no hace que todo el script sea inocuo o repetible: todavía puede contener `DROP`, `MODIFY`, cambios de datos y recreaciones. `--mariadb10` no implica `--nodelete`; incluso con `--nodelete`, las vistas, rutinas y triggers modificados pueden eliminarse y recrearse. Revisa el SQL generado y realiza un backup antes de ejecutarlo.
 
 La conversión a `utf8mb4_spanish_ci` puede cambiar las reglas de comparación y ordenación respecto al origen. Además, `SET NAMES` no se restaura al final del script, aunque sí se restauran `SQL_NOTES`, `FOREIGN_KEY_CHECKS` y `SQL_MODE`.
-
-`--preserve-views` funciona con o sin `--mariadb10`. Toda vista incluida se omite por completo: no se elimina, no se recrea y, si falta en destino, no se crea. Incluye en la lista todas las vistas relacionadas que deban permanecer intactas.
-
-`--encoding` solo controla la codificación cuando se usa `--output`; si el script se redirige con `>`, la codificación depende de la consola.
 
 ### Combinaciones Útiles
 
@@ -658,6 +660,12 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 
 `--with-data` and `--with-data-diff` are mutually exclusive. The first generates one `INSERT` per source row without comparing it with the target. The second compares rows by primary key; existing tables without a PK are skipped and, when combined with `--nodelete`, no `DELETE` statements are generated for target-only rows. The `--include-tables` and `--exclude-tables` filters apply to both table schema and table data; if a table appears in both lists, `--exclude-tables` takes precedence.
 
+### Common view and output options
+
+`--preserve-views` skips every listed view completely: it is not dropped, recreated, or created when missing from the target. Names are compared case-insensitively. Include every related view that must remain untouched.
+
+Without `--output`, SQL is written to standard output. `--encoding` only controls the file created by `--output`; when redirecting with `>`, encoding is controlled by the console. `unicode` produces UTF-16 LE, while `ansi` uses the configured Windows ANSI code page.
+
 ### MariaDB 10.2 compatibility
 
 `--mariadb10` is an optional, manually enabled mode that generates a script better suited to MariaDB 10.2. When enabled, DBComparer:
@@ -672,10 +680,6 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 This mode improves idempotency for creation DDL, but it does not make the entire script harmless or fully repeatable: it may still contain `DROP`, `MODIFY`, data changes, and object recreation. `--mariadb10` does not imply `--nodelete`; even with `--nodelete`, changed views, routines, and triggers may be dropped and recreated. Review the generated SQL and make a backup before running it.
 
 Converting to `utf8mb4_spanish_ci` may change comparison and sorting rules relative to the source. Also, `SET NAMES` is not restored at the end of the script, although `SQL_NOTES`, `FOREIGN_KEY_CHECKS`, and `SQL_MODE` are restored.
-
-`--preserve-views` works with or without `--mariadb10`. Every listed view is skipped completely: it is not dropped, recreated, or created when missing from the target. Include every related view that must remain untouched.
-
-`--encoding` only controls encoding when used with `--output`; when redirecting output with `>`, encoding is controlled by the console.
 
 ### Useful Combinations
 
