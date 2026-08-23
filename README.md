@@ -10,7 +10,7 @@
 
 *Compara, sincroniza y migra esquemas y datos entre dos bases de datos de un mismo motor con un solo comando.*
 
-[Español](#-español) • [English](#-english) • [Français](#-français) • [Deutsch](#-deutsch) • [中文](#-中文) • [한국어](#-한국어) • [العربية](#-العربية)
+[Español](#-español) • [English](#-english) • [Français](#-français) • [Deutsch](#-deutsch) • [中文](#-中文) • [한국어](#-한국어) • [العربية](#-العربية) • [Hrvatski](#-hrvatski)
 
 </div>
 
@@ -99,11 +99,11 @@
 
 | Base de Datos | Versiones Soportadas | Ejecutable | Características / Notas |
 | :--- | :--- | :--- | :--- |
-| ![MySQL](https://img.shields.io/badge/MySQL-005C84?style=flat-square&logo=mysql&logoColor=white) | 5.7+ / MariaDB 10+ | `DBComparer.exe` | Soporte completo |
+| ![MySQL](https://img.shields.io/badge/MySQL-005C84?style=flat-square&logo=mysql&logoColor=white) | 5.7+ / MariaDB 10+ | `DBComparer.exe` | Modo manual dirigido a MariaDB 10.2 con `--mariadb10` |
 | ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=flat-square&logo=postgresql&logoColor=white) | 9.6+ | `DBComparerPostGre.exe` | Soporte de esquemas |
 | ![Oracle](https://img.shields.io/badge/Oracle-F80000?style=flat-square&logo=oracle&logoColor=white) | 11g+ | `DBComparerOracle.exe` | TNS Names, Propietarios |
 | ![SQL Server](https://img.shields.io/badge/SQL%20Server-CC2927?style=flat-square&logo=microsoft-sql-server&logoColor=white) | 2012+ | `DBComparerSQLServer.exe` | Columnas Identity |
-| ![Firebird](https://img.shields.io/badge/Firebird-FF6600?style=flat-square&logo=firebird&logoColor=white) | 2.5+ / InterBase | `DBComparerInterbase.exe` | Generadores, Dialectos |, Dialectos
+| ![Firebird](https://img.shields.io/badge/Firebird-FF6600?style=flat-square&logo=firebird&logoColor=white) | 2.5+ / InterBase | `DBComparerInterbase.exe` | Generadores, Dialectos |
 
 </div>
 
@@ -196,6 +196,9 @@ DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass 
 
 # Excluir tablas de logs
 DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --exclude-tables=logs,auditoria > script_withnolog.sql
+
+# Destino MariaDB 10.2: compatibilidad con --nodelete y vistas seleccionadas intactas
+DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --mariadb10 --nodelete --preserve-views=vw_legacy,vw_reporting --output=mariadb10_sync.sql --encoding=utf8nobom
 ```
 
 ### 🐘 PostgreSQL
@@ -224,7 +227,7 @@ DBComparerOracle.exe //PROD_DB system/pass@APP_OWNER //TEST_DB system/pass@APP_O
 ### 🟦 Microsoft SQL Server
 
 ```bash
-# Modo seguro (sin borrados)
+# Protege tablas, columnas, índices y registros sobrantes frente a borrados
 DBComparerSQLServer.exe sqlserver:1433\Produccion sa\pass sqlserver:1433\Desarrollo sa\pass --nodelete > script_safe.sql
 
 # Con triggers y datos
@@ -253,11 +256,36 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 | `--with-data-diff` | 🔄 Sincronización inteligente por PK (`INSERT`/`UPDATE`/`DELETE`) |
 | `--include-tables=t1,t2` | ✅ **Lista Blanca**: Solo procesa las tablas especificadas |
 | `--exclude-tables=t1,t2` | ❌ **Lista Negra**: Excluye las tablas especificadas |
+| `--mariadb10` | 🐬 Activa explícitamente la generación SQL compatible con MariaDB 10.2; no hay detección automática de versión. Solo `DBComparer.exe` |
+| `--preserve-views=v1,v2` | Conserva las vistas indicadas: no las elimina ni las recrea. Los nombres no distinguen mayúsculas/minúsculas; si una vista no existe en destino, tampoco se crea |
+| `--output=archivo.sql` | Guarda el script generado directamente en un archivo. Solo `DBComparer.exe` |
+| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | Codificación usada con `--output`; el valor predeterminado es `utf8bom`. Solo `DBComparer.exe` |
+
+`--with-data` y `--with-data-diff` son mutuamente excluyentes. El primero genera un `INSERT` por cada fila de origen sin compararla con destino. El segundo compara por clave primaria; omite las tablas existentes sin PK y, combinado con `--nodelete`, no genera los `DELETE` de registros sobrantes. Los filtros `--include-tables` y `--exclude-tables` se aplican tanto a la estructura como a los datos de las tablas; si una tabla aparece en ambas listas, prevalece `--exclude-tables`.
+
+### Compatibilidad con MariaDB 10.2
+
+`--mariadb10` es un modo opcional y manual para generar un script más compatible con MariaDB 10.2. Al activarlo, DBComparer:
+
+- Usa `IF NOT EXISTS` al crear tablas y al añadir columnas e índices secundarios; las claves primarias usan una comprobación dinámica. Mantiene la posición de las columnas con `FIRST`/`AFTER`.
+- Incluye los índices en las tablas nuevas, conserva su motor y collation, y deriva el juego de caracteres de esa collation; si faltan metadatos, usa `InnoDB` y `utf8mb4_spanish_ci`.
+- Normaliza `CURRENT_TIMESTAMP()`, `utf8mb3`, las collations `utf8mb4_uca1400_ai_ci` y `utf8mb3_uca1400_ai_ci`, y determinados `CAST(... AS CHAR CHARSET UTF8MB4)`.
+- Reproduce columnas generadas `VIRTUAL`/`STORED`; en este modo también normaliza sus expresiones.
+- Ajusta `SQL_NOTES`, `FOREIGN_KEY_CHECKS`, `SQL_MODE` y `SET NAMES` para ejecutar el script; restaura los tres primeros al finalizar.
+- Respeta el `SQL_MODE` de origen al recrear procedimientos y funciones. Los triggers siguen requiriendo `--with-triggers`.
+
+El modo mejora la idempotencia del DDL de creación, pero no hace que todo el script sea inocuo o repetible: todavía puede contener `DROP`, `MODIFY`, cambios de datos y recreaciones. `--mariadb10` no implica `--nodelete`; incluso con `--nodelete`, las vistas, rutinas y triggers modificados pueden eliminarse y recrearse. Revisa el SQL generado y realiza un backup antes de ejecutarlo.
+
+La conversión a `utf8mb4_spanish_ci` puede cambiar las reglas de comparación y ordenación respecto al origen. Además, `SET NAMES` no se restaura al final del script, aunque sí se restauran `SQL_NOTES`, `FOREIGN_KEY_CHECKS` y `SQL_MODE`.
+
+`--preserve-views` funciona con o sin `--mariadb10`. Toda vista incluida se omite por completo: no se elimina, no se recrea y, si falta en destino, no se crea. Incluye en la lista todas las vistas relacionadas que deban permanecer intactas.
+
+`--encoding` solo controla la codificación cuando se usa `--output`; si el script se redirige con `>`, la codificación depende de la consola.
 
 ### Combinaciones Útiles
 
 ```bash
-# Modo ultraprotegido (solo agregar, nunca eliminar)
+# Protege tablas, columnas, índices y registros sobrantes frente a borrados
 --nodelete --with-data-diff
 
 # Sincronización completa con triggers
@@ -265,6 +293,9 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 
 # Solo migrar datos de tablas maestras
 --include-tables=clientes,productos,categorias --with-data
+
+# MariaDB 10.2 con --nodelete, conservando vistas gestionadas externamente
+--mariadb10 --nodelete --preserve-views=vw_legacy,vw_reporting
 ```
 
 ---
@@ -436,11 +467,11 @@ Consulta el archivo [LICENSE](LICENSE) para más detalles.
 
 | Engine | Version | Executable | Special Features |
 | --- | --- | --- | --- |
-|  | 5.7+ / MariaDB 10+ | `DBComparer.exe` | Full support |
-|  | 9.6+ | `DBComparerPostGre.exe` | Schema support |
-|  | 11g+ | `DBComparerOracle.exe` | TNS Names, Owners |
-|  | 2012+ | `DBComparerSQLServer.exe` | Identity columns |
-|  | 2.5+ / InterBase | `DBComparerInterbase.exe` | Generators, Dialects |
+| MySQL / MariaDB | 5.7+ / MariaDB 10+ | `DBComparer.exe` | Manual mode targeting MariaDB 10.2 with `--mariadb10` |
+| PostgreSQL | 9.6+ | `DBComparerPostGre.exe` | Schema support |
+| Oracle | 11g+ | `DBComparerOracle.exe` | TNS Names, Owners |
+| SQL Server | 2012+ | `DBComparerSQLServer.exe` | Identity columns |
+| Firebird / InterBase | 2.5+ / InterBase | `DBComparerInterbase.exe` | Generators, Dialects |
 
 </div>
 
@@ -547,6 +578,9 @@ DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass 
 # Exclude log tables
 DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --exclude-tables=logs,audit > script_withnolog.sql
 
+# MariaDB 10.2 target: compatibility with --nodelete and selected views preserved
+DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --mariadb10 --nodelete --preserve-views=vw_legacy,vw_reporting --output=mariadb10_sync.sql --encoding=utf8nobom
+
 ```
 
 ### 🐘 PostgreSQL
@@ -577,7 +611,7 @@ DBComparerOracle.exe //PROD_DB system/pass@APP_OWNER //TEST_DB system/pass@APP_O
 ### 🟦 Microsoft SQL Server
 
 ```bash
-# Safe mode (no deletions)
+# Protect target-only tables, columns, indexes, and rows from deletion
 DBComparerSQLServer.exe sqlserver:1433\Production sa\pass sqlserver:1433\Development sa\pass --nodelete > script_safe.sql
 
 # With triggers and data
@@ -608,11 +642,36 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 | `--with-data-diff` | 🔄 Smart sync by PK (`INSERT`/`UPDATE`/`DELETE`) |
 | `--include-tables=t1,t2` | ✅ **Whitelist**: Only process specified tables |
 | `--exclude-tables=t1,t2` | ❌ **Blacklist**: Exclude specified tables |
+| `--mariadb10` | 🐬 Opt-in SQL generation compatible with MariaDB 10.2; the server version is not auto-detected. `DBComparer.exe` only |
+| `--preserve-views=v1,v2` | Skips the listed views: they are neither dropped nor recreated, and missing views are not created. Names are case-insensitive |
+| `--output=file.sql` | Saves the generated script directly to a file. `DBComparer.exe` only |
+| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | Output encoding used with `--output`; defaults to `utf8bom`. `DBComparer.exe` only |
+
+`--with-data` and `--with-data-diff` are mutually exclusive. The first generates one `INSERT` per source row without comparing it with the target. The second compares rows by primary key; existing tables without a PK are skipped and, when combined with `--nodelete`, no `DELETE` statements are generated for target-only rows. The `--include-tables` and `--exclude-tables` filters apply to both table schema and table data; if a table appears in both lists, `--exclude-tables` takes precedence.
+
+### MariaDB 10.2 compatibility
+
+`--mariadb10` is an optional, manually enabled mode that generates a script better suited to MariaDB 10.2. When enabled, DBComparer:
+
+- Uses `IF NOT EXISTS` for table creation and for adding columns and secondary indexes; primary keys use a dynamic existence check. Column order is retained with `FIRST`/`AFTER`.
+- Includes indexes in new tables, preserves their engine and collation, and derives the character set from that collation; missing metadata falls back to `InnoDB` and `utf8mb4_spanish_ci`.
+- Normalizes `CURRENT_TIMESTAMP()`, `utf8mb3`, the `utf8mb4_uca1400_ai_ci` and `utf8mb3_uca1400_ai_ci` collations, and selected `CAST(... AS CHAR CHARSET UTF8MB4)` expressions.
+- Reproduces `VIRTUAL`/`STORED` generated columns and also normalizes their expressions in this mode.
+- Adjusts `SQL_NOTES`, `FOREIGN_KEY_CHECKS`, `SQL_MODE`, and `SET NAMES` for script execution; the first three are restored at the end.
+- Preserves the source `SQL_MODE` while recreating procedures and functions. Triggers still require `--with-triggers`.
+
+This mode improves idempotency for creation DDL, but it does not make the entire script harmless or fully repeatable: it may still contain `DROP`, `MODIFY`, data changes, and object recreation. `--mariadb10` does not imply `--nodelete`; even with `--nodelete`, changed views, routines, and triggers may be dropped and recreated. Review the generated SQL and make a backup before running it.
+
+Converting to `utf8mb4_spanish_ci` may change comparison and sorting rules relative to the source. Also, `SET NAMES` is not restored at the end of the script, although `SQL_NOTES`, `FOREIGN_KEY_CHECKS`, and `SQL_MODE` are restored.
+
+`--preserve-views` works with or without `--mariadb10`. Every listed view is skipped completely: it is not dropped, recreated, or created when missing from the target. Include every related view that must remain untouched.
+
+`--encoding` only controls encoding when used with `--output`; when redirecting output with `>`, encoding is controlled by the console.
 
 ### Useful Combinations
 
 ```bash
-# Ultra-safe mode (add only, never delete)
+# Protect target-only tables, columns, indexes, and rows from deletion
 --nodelete --with-data-diff
 
 # Full sync with triggers
@@ -620,6 +679,9 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 
 # Migrate only data for master tables
 --include-tables=customers,products,categories --with-data
+
+# MariaDB 10.2 with --nodelete while preserving externally managed views
+--mariadb10 --nodelete --preserve-views=vw_legacy,vw_reporting
 
 ```
 
@@ -693,7 +755,6 @@ See the [LICENSE](https://www.google.com/search?q=LICENSE) file for more details
 
 <details>
 <summary><strong>🇫🇷 Français</strong></summary>
-<summary><strong>🇫🇷 Français (Francés)</strong></summary>
 
 # 🔄 DBComparer
 
@@ -772,11 +833,11 @@ See the [LICENSE](https://www.google.com/search?q=LICENSE) file for more details
 
 | Moteur | Version | Exécutable | Fonctionnalités spéciales |
 | --- | --- | --- | --- |
-|  | 5.7+ / MariaDB 10+ | `DBComparer.exe` | Support complet |
-|  | 9.6+ | `DBComparerPostGre.exe` | Support des schémas |
-|  | 11g+ | `DBComparerOracle.exe` | TNS Names, Propriétaires |
-|  | 2012+ | `DBComparerSQLServer.exe` | Colonnes d'identité |
-|  | 2.5+ / InterBase | `DBComparerInterbase.exe` | Générateurs, Dialectes |
+| MySQL / MariaDB | 5.7+ / MariaDB 10+ | `DBComparer.exe` | Mode manuel pour MariaDB 10.2 avec `--mariadb10` |
+| PostgreSQL | 9.6+ | `DBComparerPostGre.exe` | Support des schémas |
+| Oracle | 11g+ | `DBComparerOracle.exe` | TNS Names, Propriétaires |
+| SQL Server | 2012+ | `DBComparerSQLServer.exe` | Colonnes d'identité |
+| Firebird / InterBase | 2.5+ / InterBase | `DBComparerInterbase.exe` | Générateurs, Dialectes |
 
 </div>
 
@@ -883,6 +944,9 @@ DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass 
 # Exclure les tables de logs
 DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --exclude-tables=logs,audit > script_sanslog.sql
 
+# Compatibilité MariaDB 10.2 avec --nodelete et certaines vues préservées
+DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --mariadb10 --nodelete --preserve-views=vw_legacy,vw_reporting --output=mariadb10_sync.sql --encoding=utf8nobom
+
 ```
 
 ### 🐘 PostgreSQL
@@ -913,7 +977,7 @@ DBComparerOracle.exe //PROD_DB system/pass@APP_OWNER //TEST_DB system/pass@APP_O
 ### 🟦 Microsoft SQL Server
 
 ```bash
-# Mode sécurisé (pas de suppressions)
+# Protège les tables, colonnes, index et enregistrements excédentaires contre la suppression
 DBComparerSQLServer.exe sqlserver:1433\Production sa\pass sqlserver:1433\Developpement sa\pass --nodelete > script_safe.sql
 
 # Avec déclencheurs et données
@@ -944,11 +1008,17 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 | `--with-data-diff` | 🔄 Sync intelligente par PK (`INSERT`/`UPDATE`/`DELETE`) |
 | `--include-tables=t1,t2` | ✅ **Liste blanche** : Traite uniquement les tables spécifiées |
 | `--exclude-tables=t1,t2` | ❌ **Liste noire** : Exclut les tables spécifiées |
+| `--mariadb10` | Active explicitement la génération SQL compatible avec MariaDB 10.2 ; aucune détection automatique. Uniquement avec `DBComparer.exe` |
+| `--preserve-views=v1,v2` | Ignore les vues indiquées : elles ne sont ni supprimées ni recréées, et les vues absentes ne sont pas créées. Noms insensibles à la casse |
+| `--output=fichier.sql` | Enregistre directement le script généré dans un fichier. Uniquement avec `DBComparer.exe` |
+| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | Encodage utilisé avec `--output` ; `utf8bom` par défaut. Uniquement avec `DBComparer.exe` |
+
+Pour les effets techniques et les limites, voir [MariaDB 10.2 compatibility](#mariadb-102-compatibility) (en anglais).
 
 ### Combinaisons utiles
 
 ```bash
-# Mode ultra-protégé (ajouter seulement, ne jamais supprimer)
+# Protège les tables, colonnes, index et enregistrements excédentaires contre la suppression
 --nodelete --with-data-diff
 
 # Sync complète avec déclencheurs
@@ -956,6 +1026,9 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 
 # Migrer uniquement les données des tables maîtresses
 --include-tables=clients,produits,categories --with-data
+
+# MariaDB 10.2 avec --nodelete et les vues gérées séparément préservées
+--mariadb10 --nodelete --preserve-views=vw_legacy,vw_reporting
 
 ```
 
@@ -1106,11 +1179,11 @@ Voir le fichier [LICENSE](https://www.google.com/search?q=LICENSE) pour plus de 
 
 | Engine | Version | Ausführbare Datei | Besondere Funktionen |
 | --- | --- | --- | --- |
-|  | 5.7+ / MariaDB 10+ | `DBComparer.exe` | Volle Unterstützung |
-|  | 9.6+ | `DBComparerPostGre.exe` | Schema-Unterstützung |
-|  | 11g+ | `DBComparerOracle.exe` | TNS Names, Owner |
-|  | 2012+ | `DBComparerSQLServer.exe` | Identity-Spalten |
-|  | 2.5+ / InterBase | `DBComparerInterbase.exe` | Generatoren, Dialekte |
+| MySQL / MariaDB | 5.7+ / MariaDB 10+ | `DBComparer.exe` | Manueller MariaDB-10.2-Modus mit `--mariadb10` |
+| PostgreSQL | 9.6+ | `DBComparerPostGre.exe` | Schema-Unterstützung |
+| Oracle | 11g+ | `DBComparerOracle.exe` | TNS Names, Owner |
+| SQL Server | 2012+ | `DBComparerSQLServer.exe` | Identity-Spalten |
+| Firebird / InterBase | 2.5+ / InterBase | `DBComparerInterbase.exe` | Generatoren, Dialekte |
 
 </div>
 
@@ -1217,6 +1290,9 @@ DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass 
 # Log-Tabellen ausschließen
 DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --exclude-tables=logs,audit > script_withnolog.sql
 
+# MariaDB-10.2-Kompatibilität mit --nodelete und ausgewählten Views
+DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --mariadb10 --nodelete --preserve-views=vw_legacy,vw_reporting --output=mariadb10_sync.sql --encoding=utf8nobom
+
 ```
 
 ### 🐘 PostgreSQL
@@ -1247,7 +1323,7 @@ DBComparerOracle.exe //PROD_DB system/pass@APP_OWNER //TEST_DB system/pass@APP_O
 ### 🟦 Microsoft SQL Server
 
 ```bash
-# Sicherer Modus (kein Löschen)
+# Schützt zusätzliche Tabellen, Spalten, Indizes und Datensätze vor dem Löschen
 DBComparerSQLServer.exe sqlserver:1433\Produktion sa\pass sqlserver:1433\Entwicklung sa\pass --nodelete > script_safe.sql
 
 # Mit Triggern und Daten
@@ -1278,11 +1354,17 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 | `--with-data-diff` | 🔄 Smart Sync per PK (`INSERT`/`UPDATE`/`DELETE`) |
 | `--include-tables=t1,t2` | ✅ **Whitelist**: Verarbeitet nur angegebene Tabellen |
 | `--exclude-tables=t1,t2` | ❌ **Blacklist**: Schließt angegebene Tabellen aus |
+| `--mariadb10` | Aktiviert explizit die SQL-Erzeugung für MariaDB 10.2; keine automatische Erkennung. Nur für `DBComparer.exe` |
+| `--preserve-views=v1,v2` | Überspringt die angegebenen Views: Sie werden weder gelöscht noch neu erstellt; fehlende Views werden ebenfalls nicht erstellt. Groß-/Kleinschreibung wird ignoriert |
+| `--output=datei.sql` | Speichert das erzeugte Skript direkt in einer Datei. Nur für `DBComparer.exe` |
+| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | Mit `--output` verwendete Ausgabekodierung; Standard ist `utf8bom`. Nur für `DBComparer.exe` |
+
+Technische Auswirkungen und Einschränkungen finden Sie unter [MariaDB 10.2 compatibility](#mariadb-102-compatibility) (Englisch).
 
 ### Nützliche Kombinationen
 
 ```bash
-# Ultra-geschützter Modus (nur hinzufügen, nie löschen)
+# Schützt zusätzliche Tabellen, Spalten, Indizes und Datensätze vor dem Löschen
 --nodelete --with-data-diff
 
 # Vollständige Sync mit Triggern
@@ -1290,6 +1372,9 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 
 # Nur Daten von Stammtabellen migrieren
 --include-tables=kunden,produkte,kategorien --with-data
+
+# MariaDB 10.2 mit --nodelete und Beibehaltung extern verwalteter Views
+--mariadb10 --nodelete --preserve-views=vw_legacy,vw_reporting
 
 ```
 
@@ -1439,11 +1524,11 @@ Siehe die Datei [LICENSE](https://www.google.com/search?q=LICENSE) für weitere 
 
 | 引擎 | 版本 | 可执行文件 | 特殊功能 |
 | --- | --- | --- | --- |
-|  | 5.7+ / MariaDB 10+ | `DBComparer.exe` | 完全支持 |
-|  | 9.6+ | `DBComparerPostGre.exe` | 架构支持 |
-|  | 11g+ | `DBComparerOracle.exe` | TNS Names, Owners |
-|  | 2012+ | `DBComparerSQLServer.exe` | 标识列 (Identity) |
-|  | 2.5+ / InterBase | `DBComparerInterbase.exe` | 生成器, 方言 |
+| MySQL / MariaDB | 5.7+ / MariaDB 10+ | `DBComparer.exe` | 使用 `--mariadb10` 的 MariaDB 10.2 手动模式 |
+| PostgreSQL | 9.6+ | `DBComparerPostGre.exe` | 架构支持 |
+| Oracle | 11g+ | `DBComparerOracle.exe` | TNS Names, Owners |
+| SQL Server | 2012+ | `DBComparerSQLServer.exe` | 标识列 (Identity) |
+| Firebird / InterBase | 2.5+ / InterBase | `DBComparerInterbase.exe` | 生成器, 方言 |
 
 </div>
 
@@ -1550,6 +1635,9 @@ DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass 
 # 排除日志表
 DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --exclude-tables=logs,audit > script_withnolog.sql
 
+# MariaDB 10.2 兼容模式：使用 --nodelete 并保留指定视图
+DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --mariadb10 --nodelete --preserve-views=vw_legacy,vw_reporting --output=mariadb10_sync.sql --encoding=utf8nobom
+
 ```
 
 ### 🐘 PostgreSQL
@@ -1580,7 +1668,7 @@ DBComparerOracle.exe //PROD_DB system/pass@APP_OWNER //TEST_DB system/pass@APP_O
 ### 🟦 Microsoft SQL Server
 
 ```bash
-# 安全模式（无删除）
+# 防止删除目标中多余的表、列、索引和记录
 DBComparerSQLServer.exe sqlserver:1433\Production sa\pass sqlserver:1433\Development sa\pass --nodelete > script_safe.sql
 
 # 带触发器和数据
@@ -1611,11 +1699,17 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 | `--with-data-diff` | 🔄 按主键智能同步 (`INSERT`/`UPDATE`/`DELETE`) |
 | `--include-tables=t1,t2` | ✅ **白名单**：仅处理指定的表 |
 | `--exclude-tables=t1,t2` | ❌ **黑名单**：排除指定的表 |
+| `--mariadb10` | 启用兼容 MariaDB 10.2 的 SQL 生成模式（需显式启用，不会自动检测服务器版本；仅适用于 `DBComparer.exe`） |
+| `--preserve-views=v1,v2` | 不删除或重新创建指定视图（名称不区分大小写）；若目标中不存在，也不会创建 |
+| `--output=output.sql` | 将生成的脚本保存到指定 SQL 文件（仅适用于 `DBComparer.exe`） |
+| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | 设置 `--output` 文件的编码；默认为 `utf8bom`，仅与 `--output` 一起生效，且仅适用于 `DBComparer.exe` |
+
+有关技术影响和限制，请参阅英文版的 [MariaDB 10.2 compatibility](#mariadb-102-compatibility)。
 
 ### 有用的组合
 
 ```bash
-# 超级安全模式（仅添加，从不删除）
+# 防止删除目标中多余的表、列、索引和记录
 --nodelete --with-data-diff
 
 # 带触发器的完全同步
@@ -1623,6 +1717,9 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 
 # 仅迁移主表数据
 --include-tables=customers,products,categories --with-data
+
+# MariaDB 10.2 使用 --nodelete，并保留外部管理的视图
+--mariadb10 --nodelete --preserve-views=vw_legacy,vw_reporting
 
 ```
 
@@ -1773,11 +1870,11 @@ in the Software without restriction...
 
 | 엔진 | 버전 | 실행 파일 | 특수 기능 |
 | --- | --- | --- | --- |
-|  | 5.7+ / MariaDB 10+ | `DBComparer.exe` | 전체 지원 |
-|  | 9.6+ | `DBComparerPostGre.exe` | 스키마 지원 |
-|  | 11g+ | `DBComparerOracle.exe` | TNS Names, Owners |
-|  | 2012+ | `DBComparerSQLServer.exe` | 식별 열 (Identity) |
-|  | 2.5+ / InterBase | `DBComparerInterbase.exe` | 생성기, 방언 |
+| MySQL / MariaDB | 5.7+ / MariaDB 10+ | `DBComparer.exe` | `--mariadb10`을 사용하는 MariaDB 10.2 수동 모드 |
+| PostgreSQL | 9.6+ | `DBComparerPostGre.exe` | 스키마 지원 |
+| Oracle | 11g+ | `DBComparerOracle.exe` | TNS Names, Owners |
+| SQL Server | 2012+ | `DBComparerSQLServer.exe` | 식별 열 (Identity) |
+| Firebird / InterBase | 2.5+ / InterBase | `DBComparerInterbase.exe` | 생성기, 방언 |
 
 </div>
 
@@ -1884,6 +1981,9 @@ DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass 
 # 로그 테이블 제외
 DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --exclude-tables=logs,audit > script_withnolog.sql
 
+# MariaDB 10.2 호환 모드: --nodelete를 사용하고 지정한 뷰 보존
+DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --mariadb10 --nodelete --preserve-views=vw_legacy,vw_reporting --output=mariadb10_sync.sql --encoding=utf8nobom
+
 ```
 
 ### 🐘 PostgreSQL
@@ -1914,7 +2014,7 @@ DBComparerOracle.exe //PROD_DB system/pass@APP_OWNER //TEST_DB system/pass@APP_O
 ### 🟦 Microsoft SQL Server
 
 ```bash
-# 안전 모드 (삭제 없음)
+# 대상에만 있는 테이블, 열, 인덱스 및 레코드 삭제 방지
 DBComparerSQLServer.exe sqlserver:1433\Production sa\pass sqlserver:1433\Development sa\pass --nodelete > script_safe.sql
 
 # 트리거 및 데이터 포함
@@ -1945,11 +2045,17 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 | `--with-data-diff` | 🔄 PK별 스마트 동기화 (`INSERT`/`UPDATE`/`DELETE`) |
 | `--include-tables=t1,t2` | ✅ **화이트리스트**: 지정된 테이블만 처리 |
 | `--exclude-tables=t1,t2` | ❌ **블랙리스트**: 지정된 테이블 제외 |
+| `--mariadb10` | MariaDB 10.2 호환 SQL 생성 모드를 명시적으로 활성화합니다(서버 버전 자동 감지 없음, `DBComparer.exe` 전용) |
+| `--preserve-views=v1,v2` | 지정한 뷰를 삭제하거나 다시 생성하지 않습니다(이름 대/소문자 구분 없음). 대상에 없어도 생성하지 않습니다 |
+| `--output=output.sql` | 생성된 스크립트를 지정한 SQL 파일에 저장합니다(`DBComparer.exe` 전용) |
+| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | `--output` 파일의 인코딩을 설정합니다. 기본값은 `utf8bom`이며 `--output`과 함께 사용할 때만 적용됩니다(`DBComparer.exe` 전용) |
+
+기술적 영향과 제한 사항은 영어 [MariaDB 10.2 compatibility](#mariadb-102-compatibility)를 참조하세요.
 
 ### 유용한 조합
 
 ```bash
-# 초안전 모드 (추가만 하고 절대 삭제하지 않음)
+# 대상에만 있는 테이블, 열, 인덱스 및 레코드 삭제 방지
 --nodelete --with-data-diff
 
 # 트리거 포함 전체 동기화
@@ -1957,6 +2063,9 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 
 # 마스터 테이블 데이터만 마이그레이션
 --include-tables=customers,products,categories --with-data
+
+# MariaDB 10.2에서 --nodelete를 사용하고 외부 관리 뷰 보존
+--mariadb10 --nodelete --preserve-views=vw_legacy,vw_reporting
 
 ```
 
@@ -2106,11 +2215,11 @@ in the Software without restriction...
 
 | المحرك | الإصدار | الملف التنفيذي | ميزات خاصة |
 | --- | --- | --- | --- |
-|  | 5.7+ / MariaDB 10+ | `DBComparer.exe` | دعم كامل |
-|  | 9.6+ | `DBComparerPostGre.exe` | دعم المخططات |
-|  | 11g+ | `DBComparerOracle.exe` | TNS Names, Owners |
-|  | 2012+ | `DBComparerSQLServer.exe` | أعمدة الهوية (Identity) |
-|  | 2.5+ / InterBase | `DBComparerInterbase.exe` | المولدات، اللهجات |
+| MySQL / MariaDB | 5.7+ / MariaDB 10+ | `DBComparer.exe` | وضع MariaDB 10.2 اليدوي باستخدام `--mariadb10` |
+| PostgreSQL | 9.6+ | `DBComparerPostGre.exe` | دعم المخططات |
+| Oracle | 11g+ | `DBComparerOracle.exe` | TNS Names, Owners |
+| SQL Server | 2012+ | `DBComparerSQLServer.exe` | أعمدة الهوية (Identity) |
+| Firebird / InterBase | 2.5+ / InterBase | `DBComparerInterbase.exe` | المولدات، اللهجات |
 
 </div>
 
@@ -2217,6 +2326,9 @@ DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass 
 # استبعاد جداول السجلات
 DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --exclude-tables=logs,audit > script_withnolog.sql
 
+# وضع التوافق مع MariaDB 10.2 باستخدام --nodelete، مع الحفاظ على طرق العرض المحددة
+DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --mariadb10 --nodelete --preserve-views=vw_legacy,vw_reporting --output=mariadb10_sync.sql --encoding=utf8nobom
+
 ```
 
 ### 🐘 PostgreSQL
@@ -2247,7 +2359,7 @@ DBComparerOracle.exe //PROD_DB system/pass@APP_OWNER //TEST_DB system/pass@APP_O
 ### 🟦 Microsoft SQL Server
 
 ```bash
-# الوضع الآمن (بدون حذف)
+# يحمي الجداول والأعمدة والفهارس والسجلات الزائدة في الهدف من الحذف
 DBComparerSQLServer.exe sqlserver:1433\Production sa\pass sqlserver:1433\Development sa\pass --nodelete > script_safe.sql
 
 # مع المشغلات والبيانات
@@ -2278,11 +2390,17 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 | `--with-data-diff` | 🔄 مزامنة ذكية بواسطة PK (`INSERT`/`UPDATE`/`DELETE`) |
 | `--include-tables=t1,t2` | ✅ **القائمة البيضاء**: معالجة الجداول المحددة فقط |
 | `--exclude-tables=t1,t2` | ❌ **القائمة السوداء**: استبعاد الجداول المحددة |
+| `--mariadb10` | وضع يُفعَّل صراحةً لتوليد SQL متوافق مع MariaDB 10.2؛ لا يوجد اكتشاف تلقائي للإصدار، ومتاح فقط في `DBComparer.exe` |
+| `--preserve-views=v1,v2` | لا يحذف طرق العرض المحددة ولا يعيد إنشاءها؛ الأسماء غير حساسة لحالة الأحرف، وطرق العرض غير الموجودة لا يتم إنشاؤها |
+| `--output=output.sql` | يحفظ الناتج في ملف؛ متاح فقط في `DBComparer.exe` |
+| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | ترميز ملف الإخراج؛ يُستخدم فقط مع `--output` وفي `DBComparer.exe`، والقيمة الافتراضية هي `utf8bom` |
+
+للتأثيرات التقنية والقيود، راجع قسم [MariaDB 10.2 compatibility](#mariadb-102-compatibility) باللغة الإنجليزية.
 
 ### مجموعات مفيدة
 
 ```bash
-# وضع فائق الأمان (إضافة فقط، لا حذف أبداً)
+# يحمي الجداول والأعمدة والفهارس والسجلات الزائدة في الهدف من الحذف
 --nodelete --with-data-diff
 
 # مزامنة كاملة مع المشغلات
@@ -2290,6 +2408,9 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 
 # ترحيل بيانات الجداول الرئيسية فقط
 --include-tables=customers,products,categories --with-data
+
+# MariaDB 10.2 باستخدام --nodelete مع الحفاظ على طرق العرض المُدارة خارجياً
+--mariadb10 --nodelete --preserve-views=vw_legacy,vw_reporting
 
 ```
 
@@ -2440,11 +2561,11 @@ in the Software without restriction...
 
 | Pogon | Verzija | Izvršna datoteka | Posebne značajke |
 | --- | --- | --- | --- |
-|  | 5.7+ / MariaDB 10+ | `DBComparer.exe` | Puna podrška |
-|  | 9.6+ | `DBComparerPostGre.exe` | Podrška za sheme |
-|  | 11g+ | `DBComparerOracle.exe` | TNS imena, Vlasnici |
-|  | 2012+ | `DBComparerSQLServer.exe` | Identity stupci |
-|  | 2.5+ / InterBase | `DBComparerInterbase.exe` | Generatori, Dijalekti |
+| MySQL / MariaDB | 5.7+ / MariaDB 10+ | `DBComparer.exe` | Ručni način MariaDB 10.2 uz `--mariadb10` |
+| PostgreSQL | 9.6+ | `DBComparerPostGre.exe` | Podrška za sheme |
+| Oracle | 11g+ | `DBComparerOracle.exe` | TNS imena, Vlasnici |
+| SQL Server | 2012+ | `DBComparerSQLServer.exe` | Identity stupci |
+| Firebird / InterBase | 2.5+ / InterBase | `DBComparerInterbase.exe` | Generatori, Dijalekti |
 
 </div>
 
@@ -2551,6 +2672,9 @@ DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass 
 # Isključi tablice logova
 DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --exclude-tables=logovi,revizija > skripta_bez_logova.sql
 
+# Kompatibilnost s MariaDB 10.2 uz --nodelete i očuvanje navedenih pogleda
+DBComparer.exe localhost:3306\db_prod root\pass localhost:3306\db_dev root\pass --mariadb10 --nodelete --preserve-views=vw_legacy,vw_reporting --output=mariadb10_sync.sql --encoding=utf8nobom
+
 ```
 
 ### 🐘 PostgreSQL
@@ -2581,7 +2705,7 @@ DBComparerOracle.exe //PROD_DB system/pass@APP_OWNER //TEST_DB system/pass@APP_O
 ### 🟦 Microsoft SQL Server
 
 ```bash
-# Siguran način (bez brisanja)
+# Štiti suvišne tablice, stupce, indekse i zapise u odredištu od brisanja
 DBComparerSQLServer.exe sqlserver:1433\Produkcija sa\pass sqlserver:1433\Razvoj sa\pass --nodelete > skripta_sigurna.sql
 
 # S okidačima i podacima
@@ -2612,11 +2736,17 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 | `--with-data-diff` | 🔄 Pametna sinkronizacija po PK (`INSERT`/`UPDATE`/`DELETE`) |
 | `--include-tables=t1,t2` | ✅ **Bijela lista**: Obrađuje samo navedene tablice |
 | `--exclude-tables=t1,t2` | ❌ **Crna lista**: Isključuje navedene tablice |
+| `--mariadb10` | Izričito uključuje generiranje SQL-a kompatibilnog s MariaDB 10.2; nema automatskog otkrivanja verzije. Samo za `DBComparer.exe` |
+| `--preserve-views=v1,v2` | Ne briše niti ponovno stvara navedene poglede; nazivi se uspoređuju bez razlikovanja velikih i malih slova, a nepostojeći pogledi se ne stvaraju |
+| `--output=datoteka.sql` | Sprema izlaz u datoteku; dostupno samo u `DBComparer.exe` |
+| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | Kodiranje izlazne datoteke; koristi se samo uz `--output` i u `DBComparer.exe`, zadano je `utf8bom` |
+
+Za tehničke učinke i ograničenja pogledajte [MariaDB 10.2 compatibility](#mariadb-102-compatibility) (na engleskom).
 
 ### Korisne kombinacije
 
 ```bash
-# Ultra-zaštićeni način (samo dodaj, nikad ne briši)
+# Štiti suvišne tablice, stupce, indekse i zapise u odredištu od brisanja
 --nodelete --with-data-diff
 
 # Potpuna sinkronizacija s okidačima
@@ -2624,6 +2754,9 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 
 # Migracija samo podataka matičnih tablica
 --include-tables=kupci,proizvodi,kategorije --with-data
+
+# MariaDB 10.2 uz --nodelete i očuvanje pogleda kojima se upravlja izvana
+--mariadb10 --nodelete --preserve-views=vw_legacy,vw_reporting
 
 ```
 

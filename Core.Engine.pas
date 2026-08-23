@@ -173,6 +173,11 @@ begin
     begin
       for i := 0 to TargetTables.Count - 1 do
       begin
+        if (FOptions.IncludeTables.Count > 0) and
+           (FOptions.IncludeTables.IndexOf(TargetTables[i]) = -1) then
+          Continue;
+        if FOptions.ExcludeTables.IndexOf(TargetTables[i]) >= 0 then
+          Continue;
         if SourceTables.IndexOf(TargetTables[i]) = -1 then
         begin
           FWriter.AddComment(TRes.MsgTableDeleted + TargetTables[i]);

@@ -135,7 +135,15 @@ begin
       Result.WithTriggers := True
     else if Param = '--mariadb10' then
       Result.MariaDB10Compat := True
-    // ... mantienes tus otros else if ...
+    else if Param = '--with-data' then
+      Result.WithData := True
+    else if Param = '--with-data-diff' then
+      Result.WithDataDiff := True
+    else if StartsText('--exclude-tables=', Param) then
+    begin
+      Value := Copy(ParamStr(i), Length('--exclude-tables=') + 1, MaxInt);
+      Result.ExcludeTables.CommaText := Value;
+    end
     else if StartsText('--include-tables=', Param) then
     begin
       Value := Copy(ParamStr(i), Length('--include-tables=') + 1, MaxInt);
@@ -146,7 +154,6 @@ begin
       Value := Copy(ParamStr(i), Length('--preserve-views=') + 1, MaxInt);
       Result.PreserveViews.CommaText := Value;
     end
-    // --- NUEVOS PARÁMETROS ---
     else if StartsText('--output=', Param) then
     begin
       Result.OutputFile := Copy(ParamStr(i), Length('--output=') + 1, MaxInt);
@@ -159,8 +166,11 @@ begin
   end;
   // Validación básica
   if Result.WithData and Result.WithDataDiff then
+  begin
+    Result.Free;
     raise Exception.Create('Error: No puedes usar --with-data y ' +
                            '--with-data-diff a la vez.');
+  end;
 end;
 
 { TConnectionConfig }

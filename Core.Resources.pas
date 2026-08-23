@@ -155,8 +155,8 @@ begin
     TRes.OptTriggers := 'Incluye comparación de triggers';
     TRes.OptWithData := 'Copia todos los datos de origen a destino (INSERT)';
     TRes.OptDataDiff := 'Sincroniza datos comparando por clave primaria (INSERT/UPDATE/DELETE)';
-    TRes.OptExclude := 'Excluye tablas específicas de la sincronización de datos';
-    TRes.OptInclude := 'Solo sincroniza datos de estas tablas';
+    TRes.OptExclude := 'Excluye tablas específicas de la sincronización';
+    TRes.OptInclude := 'Solo sincroniza estas tablas';
     TRes.OptExcludeDesc := '(Lista Negra: Sincroniza todo MENOS esto)';
     TRes.OptIncludeDesc := '(Lista Blanca: Solo sincroniza ESTO, ignora el resto)';
     TRes.MsgNewTable := 'Tabla nueva: ';
@@ -248,8 +248,8 @@ begin
     TRes.OptTriggers := 'Inclut la comparaison des déclencheurs';
     TRes.OptWithData := 'Copie toutes les données de la source vers la cible (INSERT)';
     TRes.OptDataDiff := 'Synchronise les données en comparant par clé primaire (INSERT/UPDATE/DELETE)';
-    TRes.OptExclude := 'Exclut des tables spécifiques de la synchronisation des données';
-    TRes.OptInclude := 'Synchronise uniquement les données de ces tables';
+    TRes.OptExclude := 'Exclut des tables spécifiques de la synchronisation';
+    TRes.OptInclude := 'Synchronise uniquement ces tables';
     TRes.OptExcludeDesc := '(Liste noire : Synchronise tout SAUF ceci)';
     TRes.OptIncludeDesc := '(Liste blanche : Synchronise uniquement CECI, ignore le reste)';
     TRes.MsgNewTable := 'Nouvelle table : ';
@@ -339,8 +339,8 @@ begin
     TRes.OptTriggers := 'Enthält Trigger-Vergleich';
     TRes.OptWithData := 'Kopiert alle Daten von Quelle zu Ziel (INSERT)';
     TRes.OptDataDiff := 'Synchronisiert Daten durch Vergleich des Primärschlüssels (INSERT/UPDATE/DELETE)';
-    TRes.OptExclude := 'Schließt bestimmte Tabellen von der Datensynchronisation aus';
-    TRes.OptInclude := 'Synchronisiert nur Daten dieser Tabellen';
+    TRes.OptExclude := 'Schließt bestimmte Tabellen von der Synchronisation aus';
+    TRes.OptInclude := 'Synchronisiert nur diese Tabellen';
     TRes.OptExcludeDesc := '(Schwarze Liste: Alles synchronisieren AUSSER dies)';
     TRes.OptIncludeDesc := '(Weiße Liste: Nur DIES synchronisieren, Rest ignorieren)';
     TRes.MsgNewTable := 'Neue Tabelle: ';
@@ -430,8 +430,8 @@ begin
     TRes.OptTriggers := '包括触发器比较';
     TRes.OptWithData := '从源复制所有数据到目标（INSERT）';
     TRes.OptDataDiff := '通过主键比较同步数据（INSERT/UPDATE/DELETE）';
-    TRes.OptExclude := '从数据同步中排除特定表';
-    TRes.OptInclude := '仅同步这些表的数据';
+    TRes.OptExclude := '从同步中排除特定表';
+    TRes.OptInclude := '仅同步这些表';
     TRes.OptExcludeDesc := '（黑名单：同步除此之外的所有内容）';
     TRes.OptIncludeDesc := '（白名单：仅同步这些，忽略其他）';
     TRes.MsgNewTable := '新表：';
@@ -521,8 +521,8 @@ begin
     TRes.OptTriggers := '트리거 비교 포함';
     TRes.OptWithData := '원본에서 대상으로 모든 데이터 복사 (INSERT)';
     TRes.OptDataDiff := '기본 키로 비교하여 데이터 동기화 (INSERT/UPDATE/DELETE)';
-    TRes.OptExclude := '데이터 동기화에서 특정 테이블 제외';
-    TRes.OptInclude := '이 테이블의 데이터만 동기화';
+    TRes.OptExclude := '동기화에서 특정 테이블 제외';
+    TRes.OptInclude := '이 테이블만 동기화';
     TRes.OptExcludeDesc := '(블랙리스트: 이것을 제외한 모든 것 동기화)';
     TRes.OptIncludeDesc := '(화이트리스트: 이것만 동기화, 나머지 무시)';
     TRes.MsgNewTable := '새 테이블: ';
@@ -612,8 +612,8 @@ begin
     TRes.OptTriggers := 'تضمين مقارنة المشغلات';
     TRes.OptWithData := 'نسخ جميع البيانات من المصدر إلى الهدف (INSERT)';
     TRes.OptDataDiff := 'مزامنة البيانات بالمقارنة بالمفتاح الأساسي (INSERT/UPDATE/DELETE)';
-    TRes.OptExclude := 'استبعاد جداول محددة من مزامنة البيانات';
-    TRes.OptInclude := 'مزامنة بيانات هذه الجداول فقط';
+    TRes.OptExclude := 'استبعاد جداول محددة من المزامنة';
+    TRes.OptInclude := 'مزامنة هذه الجداول فقط';
     TRes.OptExcludeDesc := '(القائمة السوداء: مزامنة كل شيء باستثناء هذا)';
     TRes.OptIncludeDesc := '(القائمة البيضاء: مزامنة هذا فقط، تجاهل الباقي)';
     TRes.MsgNewTable := 'جدول جديد: ';
@@ -703,8 +703,8 @@ begin
     TRes.OptTriggers := 'Uključuje usporedbu okidača (triggers)';
     TRes.OptWithData := 'Kopira sve podatke iz izvora u odredište (INSERT)';
     TRes.OptDataDiff := 'Sinkronizira podatke usporedbom primarnog ključa (INSERT/UPDATE/DELETE)';
-    TRes.OptExclude := 'Isključuje određene tablice iz sinkronizacije podataka';
-    TRes.OptInclude := 'Sinkronizira samo podatke ovih tablica';
+    TRes.OptExclude := 'Isključuje određene tablice iz sinkronizacije';
+    TRes.OptInclude := 'Sinkronizira samo ove tablice';
     TRes.OptExcludeDesc := '(Crna lista: Sinkroniziraj sve OSIM ovoga)';
     TRes.OptIncludeDesc := '(Bijela lista: Sinkroniziraj samo OVO, zanemari ostalo)';
     TRes.MsgNewTable := 'Nova tablica: ';
@@ -794,8 +794,8 @@ begin
     TRes.OptTriggers := 'Include trigger comparison';
     TRes.OptWithData := 'Copy all data from source to target (INSERT)';
     TRes.OptDataDiff := 'Sync data by comparing primary key (INSERT/UPDATE/DELETE)';
-    TRes.OptExclude := 'Exclude specific tables from data sync';
-    TRes.OptInclude := 'Only sync data from these tables';
+    TRes.OptExclude := 'Exclude specific tables from synchronization';
+    TRes.OptInclude := 'Only synchronize these tables';
     TRes.OptExcludeDesc := '(Blacklist: Sync everything EXCEPT this)';
     TRes.OptIncludeDesc := '(Whitelist: Only sync THIS, ignore rest)';
     TRes.MsgNewTable := 'New table: ';
