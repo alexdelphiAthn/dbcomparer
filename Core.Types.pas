@@ -171,6 +171,15 @@ begin
     raise Exception.Create('Error: No puedes usar --with-data y ' +
                            '--with-data-diff a la vez.');
   end;
+  if not MatchText(Result.OutputEncoding,
+    ['utf8bom', 'utf8nobom', 'ansi', 'unicode']) then
+  begin
+    Value := Result.OutputEncoding;
+    Result.Free;
+    raise Exception.CreateFmt(
+      'Error: Codificación de salida no válida: "%s". ' +
+      'Use utf8bom, utf8nobom, ansi o unicode.', [Value]);
+  end;
 end;
 
 { TConnectionConfig }

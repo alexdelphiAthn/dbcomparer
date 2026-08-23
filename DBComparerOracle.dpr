@@ -8,6 +8,7 @@ uses
   Core.Types in 'Core.Types.pas',
   Providers.Oracle in 'Providers.Oracle.pas',
   ScriptWriters in 'ScriptWriters.pas',
+  Core.Output in 'Core.Output.pas',
   Providers.Oracle.Helpers in 'Providers.Oracle.Helpers.pas',
   System.SysUtils,
   system.StrUtils,
@@ -41,6 +42,9 @@ begin
   Writeln('                            ' + TRes.OptExcludeDesc);
   Writeln('  --include-tables=T1,T2...  '+ TRes.OptInclude);
   Writeln('                             '+ TRes.OptIncludeDesc);
+  Writeln('  --preserve-views=V1,V2... ' + TRes.OptPreserveViews);
+  Writeln('  --output=file.sql         ' + TRes.OptOutput);
+  Writeln('  --encoding=utf8bom|utf8nobom|ansi|unicode ' + TRes.OptEncoding);
   Writeln('');
   Writeln('');
   Writeln(TRes.ExamplesHeader);
@@ -56,6 +60,7 @@ begin
   Writeln('  DBComparerOracle ... --with-data-diff --include-tables=CUSTOMERS,ORDERS');
   Writeln('');
   Writeln(TRes.FooterFile);
+  Writeln('  DBComparerOracle ... --output=script.sql --encoding=utf8bom');
   Writeln('  DBComparerOracle ... > script.sql');
   Writeln('');
   Halt(1);
@@ -133,6 +138,9 @@ var
   SrcServer, SrcPort, SrcSID, SrcUser, SrcPass, SrcOwner: string;
   TgtServer, TgtPort, TgtSID, TgtUser, TgtPass, TgtOwner: string;
 begin
+  SourceConn := nil;
+  TargetConn := nil;
+  Options := nil;
   try
     if (ParamCount < 4) then
     begin
@@ -210,7 +218,7 @@ begin
                                          Options);
       try
         Engine.GenerateScript;
-        Writeln(Writer.GetScript);
+        WriteScriptOutput(Writer, Options);
       finally
         Engine.Free;
       end;
@@ -221,6 +229,9 @@ begin
     end;
   except
     on E: Exception do
+    begin
       Writeln(ErrOutput, 'ERROR: ', E.Message);
+      ExitCode := 1;
+    end;
   end;
 end.

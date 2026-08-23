@@ -103,9 +103,10 @@ type
     class var ExPGSimple: string;
     class var ExPGFilter: string;
 
-    // En la clase TRes (interface) añade:
+    class var OptPreserveViews: string;
     class var OptOutput: string;
     class var OptEncoding: string;
+    class var MsgOutputSaved: string;
   end;
 
 implementation
@@ -146,7 +147,7 @@ begin
     TRes.UsageTNS := '      Para TNS: //tnsname usuario/password';
     TRes.OptionsHeader := 'Opciones:';
     TRes.ExamplesHeader := 'Ejemplos:';
-    TRes.FooterFile := 'El resultado se imprime por la salida estándar. Para guardarlo en archivo:';
+    TRes.FooterFile := 'Por defecto, el script se escribe en la salida estándar. Use --output=archivo.sql o redirija con >';
     TRes.GeneratedHeader := 'SCRIPT DE SINCRONIZACIÓN (Generado: %s)';
     TRes.MsgWarnNoPK := 'ADVERTENCIA: %s no tiene PK. Se omite sincronización de datos.';
     TRes.UsageExampleCmd := '  %s servidor1:puerto1\database1 usuario1\password1 ' +
@@ -223,23 +224,27 @@ begin
                        'servidor2:5432\midb\test_schema usuario\pass --with-data-diff --nodelete';
     TRes.ExPGSimple := '  %s localhost\midb postgres\pass localhost\midb_test postgres\pass --with-data-diff';
     TRes.ExPGFilter := '  %s ... --with-data-diff --include-tables=clientes,productos';
+    TRes.OptPreserveViews := 'Omite las vistas indicadas: no las elimina, recrea ni crea si faltan; nombres sin distinción de mayúsculas/minúsculas';
     TRes.OptOutput := 'Guarda el script generado directamente en un archivo';
-    TRes.OptEncoding := 'Codificación de salida: utf8bom (defecto), utf8nobom, ansi, unicode';
+    TRes.OptEncoding := 'Codificación de --output: utf8bom (predeterminada), utf8nobom, ansi o unicode';
+    TRes.MsgOutputSaved := 'Script guardado en: %s';
   end
   // ============================================================================
   // FRANÇAIS
   // ============================================================================
   else if LangCode = 'fr' then
   begin
+    TRes.OptPreserveViews := 'Ignore les vues indiquées : elles ne sont ni supprimées, ni recréées, ni créées si absentes ; noms insensibles à la casse';
     TRes.OptOutput := 'Enregistre le script généré directement dans un fichier';
-    TRes.OptEncoding := 'Encodage de sortie : utf8bom (défaut), utf8nobom, ansi, unicode';
+    TRes.OptEncoding := 'Encodage de --output : utf8bom (défaut), utf8nobom, ansi ou unicode';
+    TRes.MsgOutputSaved := 'Script enregistré dans : %s';
     TRes.UsageHeader := 'Utilisation :';
     TRes.UsageNotePort := 'Note : Le port par défaut est %d si omis';
     TRes.UsageFormat := '      Pour spécifier le schéma : base\schéma (par défaut : public)';
     TRes.UsageTNS := '      Pour TNS : //tnsname utilisateur/motdepasse';
     TRes.OptionsHeader := 'Options :';
     TRes.ExamplesHeader := 'Exemples :';
-    TRes.FooterFile := 'Le résultat est affiché sur la sortie standard. Pour l''enregistrer dans un fichier :';
+    TRes.FooterFile := 'Par défaut, le script est écrit sur la sortie standard. Utilisez --output=fichier.sql ou redirigez avec >';
     TRes.GeneratedHeader := 'SCRIPT DE SYNCHRONISATION (Généré : %s)';
     TRes.MsgWarnNoPK := 'AVERTISSEMENT : %s n''a pas de clé primaire. Synchronisation des données ignorée.';
     TRes.UsageExampleCmd := '  %s serveur1:port1\base1 utilisateur1\motdepasse1 ' +
@@ -322,15 +327,17 @@ begin
   // ============================================================================
   else if LangCode = 'de' then
   begin
+    TRes.OptPreserveViews := 'Überspringt die angegebenen Views: Sie werden nicht gelöscht, neu erstellt oder bei Fehlen angelegt; Groß-/Kleinschreibung wird ignoriert';
     TRes.OptOutput := 'Speichert das generierte Skript direkt in einer Datei';
-    TRes.OptEncoding := 'Ausgabe-Kodierung: utf8bom (Standard), utf8nobom, ansi, unicode';
+    TRes.OptEncoding := 'Kodierung für --output: utf8bom (Standard), utf8nobom, ansi oder unicode';
+    TRes.MsgOutputSaved := 'Skript gespeichert unter: %s';
     TRes.UsageHeader := 'Verwendung:';
     TRes.UsageNotePort := 'Hinweis: Standardport ist %d, wenn nicht angegeben';
     TRes.UsageFormat := '      Um Schema anzugeben: datenbank\schema (Standard: public)';
     TRes.UsageTNS := '      Für TNS: //tnsname benutzer/passwort';
     TRes.OptionsHeader := 'Optionen:';
     TRes.ExamplesHeader := 'Beispiele:';
-    TRes.FooterFile := 'Die Ausgabe wird auf der Standardausgabe ausgegeben. Zum Speichern in Datei:';
+    TRes.FooterFile := 'Standardmäßig wird das Skript auf die Standardausgabe geschrieben. Verwenden Sie --output=datei.sql oder leiten Sie mit > um';
     TRes.GeneratedHeader := 'SYNCHRONISATIONSSKRIPT (Erstellt: %s)';
     TRes.MsgWarnNoPK := 'WARNUNG: %s hat keinen Primärschlüssel. Datensynchronisation wird übersprungen.';
     TRes.UsageExampleCmd := '  %s server1:port1\datenbank1 benutzer1\passwort1 ' +
@@ -413,15 +420,17 @@ begin
   // ============================================================================
   else if LangCode = 'zh' then
   begin
+    TRes.OptPreserveViews := '跳过指定视图：不删除、不重新创建，目标中缺失时也不创建；名称不区分大小写';
     TRes.OptOutput := '将生成的脚本直接保存到文件中';
-    TRes.OptEncoding := '输出编码：utf8bom（默认）、utf8nobom、ansi、unicode';
+    TRes.OptEncoding := '--output 编码：utf8bom（默认）、utf8nobom、ansi 或 unicode';
+    TRes.MsgOutputSaved := '脚本已保存到：%s';
     TRes.UsageHeader := '用法：';
     TRes.UsageNotePort := '注意：如果省略，默认端口为 %d';
     TRes.UsageFormat := '      指定模式：数据库\模式（默认：public）';
     TRes.UsageTNS := '      TNS连接：//tnsname 用户名/密码';
     TRes.OptionsHeader := '选项：';
     TRes.ExamplesHeader := '示例：';
-    TRes.FooterFile := '结果输出到标准输出。保存到文件：';
+    TRes.FooterFile := '默认将脚本写入标准输出。可使用 --output=output.sql 或通过 > 重定向';
     TRes.GeneratedHeader := '同步脚本（生成时间：%s）';
     TRes.MsgWarnNoPK := '警告：%s 没有主键。跳过数据同步。';
     TRes.UsageExampleCmd := '  %s 服务器1:端口1\数据库1 用户名1\密码1 ' +
@@ -504,15 +513,17 @@ begin
   // ============================================================================
   else if LangCode = 'ko' then
   begin
+    TRes.OptPreserveViews := '지정한 뷰를 건너뜁니다. 삭제하거나 다시 만들지 않으며, 대상에 없어도 생성하지 않습니다. 이름은 대/소문자를 구분하지 않습니다';
     TRes.OptOutput := '생성된 스크립트를 파일로 직접 저장합니다';
-    TRes.OptEncoding := '출력 인코딩: utf8bom (기본값), utf8nobom, ansi, unicode';
+    TRes.OptEncoding := '--output 인코딩: utf8bom(기본값), utf8nobom, ansi 또는 unicode';
+    TRes.MsgOutputSaved := '스크립트 저장 위치: %s';
     TRes.UsageHeader := '사용법:';
     TRes.UsageNotePort := '참고: 생략 시 기본 포트는 %d입니다';
     TRes.UsageFormat := '      스키마 지정: 데이터베이스\스키마 (기본값: public)';
     TRes.UsageTNS := '      TNS 연결: //tnsname 사용자/암호';
     TRes.OptionsHeader := '옵션:';
     TRes.ExamplesHeader := '예제:';
-    TRes.FooterFile := '결과가 표준 출력으로 출력됩니다. 파일로 저장:';
+    TRes.FooterFile := '기본적으로 스크립트는 표준 출력에 기록됩니다. --output=output.sql을 사용하거나 >로 리디렉션하세요';
     TRes.GeneratedHeader := '동기화 스크립트 (생성 시간: %s)';
     TRes.MsgWarnNoPK := '경고: %s에 기본 키가 없습니다. 데이터 동기화를 건너뜁니다.';
     TRes.UsageExampleCmd := '  %s 서버1:포트1\데이터베이스1 사용자1\암호1 ' +
@@ -595,15 +606,17 @@ begin
   // ============================================================================
   else if LangCode = 'ar' then
   begin
+    TRes.OptPreserveViews := 'يتخطى طرق العرض المحددة: لا يحذفها أو يعيد إنشاءها أو ينشئها إذا كانت مفقودة؛ الأسماء غير حساسة لحالة الأحرف';
     TRes.OptOutput := 'يحفظ البرنامج النصي الذي تم إنشاؤه مباشرة في ملف';
-    TRes.OptEncoding := 'ترميز الإخراج: utf8bom (الافتراضي)، utf8nobom، ansi، unicode';
+    TRes.OptEncoding := 'ترميز --output: utf8bom (الافتراضي) أو utf8nobom أو ansi أو unicode';
+    TRes.MsgOutputSaved := 'تم حفظ البرنامج النصي في: %s';
     TRes.UsageHeader := 'الاستخدام:';
     TRes.UsageNotePort := 'ملاحظة: المنفذ الافتراضي هو %d إذا تم حذفه';
     TRes.UsageFormat := '      لتحديد المخطط: قاعدة_البيانات\المخطط (الافتراضي: public)';
     TRes.UsageTNS := '      لـ TNS: //tnsname اسم_المستخدم/كلمة_المرور';
     TRes.OptionsHeader := 'الخيارات:';
     TRes.ExamplesHeader := 'أمثلة:';
-    TRes.FooterFile := 'يتم طباعة النتيجة على الإخراج القياسي. للحفظ في ملف:';
+    TRes.FooterFile := 'يُكتب البرنامج النصي افتراضيًا إلى الإخراج القياسي. استخدم --output=output.sql أو أعد التوجيه بواسطة >';
     TRes.GeneratedHeader := 'نص المزامنة (تم الإنشاء: %s)';
     TRes.MsgWarnNoPK := 'تحذير: %s ليس له مفتاح أساسي. تخطي مزامنة البيانات.';
     TRes.UsageExampleCmd := '  %s الخادم1:المنفذ1\قاعدة_البيانات1 المستخدم1\كلمة_المرور1 ' +
@@ -686,15 +699,17 @@ begin
   // ============================================================================
   else if LangCode = 'hr' then
   begin
+    TRes.OptPreserveViews := 'Preskače navedene poglede: ne briše ih, ponovno stvara niti stvara ako nedostaju; nazivi ne razlikuju velika i mala slova';
     TRes.OptOutput := 'Sprema generiranu skriptu izravno u datoteku';
-    TRes.OptEncoding := 'Izlazno kodiranje: utf8bom (zadano), utf8nobom, ansi, unicode';
+    TRes.OptEncoding := 'Kodiranje za --output: utf8bom (zadano), utf8nobom, ansi ili unicode';
+    TRes.MsgOutputSaved := 'Skripta spremljena u: %s';
     TRes.UsageHeader := 'Upotreba:';
     TRes.UsageNotePort := 'Napomena: Zadani port je %d ako se izostavi';
     TRes.UsageFormat := '      Za određivanje sheme: baza\shema (zadano: public)';
     TRes.UsageTNS := '      Za TNS: //tnsname korisnik/lozinka';
     TRes.OptionsHeader := 'Opcije:';
     TRes.ExamplesHeader := 'Primjeri:';
-    TRes.FooterFile := 'Rezultat se ispisuje na standardni izlaz. Za spremanje u datoteku:';
+    TRes.FooterFile := 'Skripta se zadano ispisuje na standardni izlaz. Upotrijebite --output=datoteka.sql ili preusmjerite s >';
     TRes.GeneratedHeader := 'SKRIPT ZA SINKRONIZACIJU (Generirano: %s)';
     TRes.MsgWarnNoPK := 'UPOZORENJE: %s nema PK. Sinkronizacija podataka se preskače.';
     TRes.UsageExampleCmd := '  %s poslužitelj1:port1\baza1 korisnik1\lozinka1 ' +
@@ -777,15 +792,17 @@ begin
   // ============================================================================
   else
   begin
+    TRes.OptPreserveViews := 'Skip the listed views: do not drop, recreate, or create them when missing; names are case-insensitive';
     TRes.OptOutput := 'Save the generated script directly to a file';
-    TRes.OptEncoding := 'Output encoding: utf8bom (default), utf8nobom, ansi, unicode';
+    TRes.OptEncoding := 'Encoding for --output: utf8bom (default), utf8nobom, ansi, or unicode';
+    TRes.MsgOutputSaved := 'Script saved to: %s';
     TRes.UsageHeader := 'Usage:';
     TRes.UsageNotePort := 'Note: Default port is %d if omitted';
     TRes.UsageFormat := '      To specify schema: database\schema (default: public)';
     TRes.UsageTNS := '      For TNS: //tnsname user/password';
     TRes.OptionsHeader := 'Options:';
     TRes.ExamplesHeader := 'Examples:';
-    TRes.FooterFile := 'Result is printed to standard output. To save to file:';
+    TRes.FooterFile := 'By default, the script is written to standard output. Use --output=file.sql or redirect with >';
     TRes.GeneratedHeader := 'SYNCHRONIZATION SCRIPT (Generated: %s)';
     TRes.MsgWarnNoPK := 'WARNING: %s has no PK. Data synchronization skipped.';
     TRes.UsageExampleCmd := '  %s server1:port1\database1 user1\password1 ' +

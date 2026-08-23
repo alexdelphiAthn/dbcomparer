@@ -8,6 +8,7 @@ uses
   Core.Types in 'Core.Types.pas',
   Providers.InterBase in 'Providers.InterBase.pas',
   ScriptWriters in 'ScriptWriters.pas',
+  Core.Output in 'Core.Output.pas',
   Providers.InterBase.Helpers in 'Providers.InterBase.Helpers.pas',
   System.SysUtils,
   Core.Resources in 'Core.Resources.pas';
@@ -30,10 +31,13 @@ begin
   Writeln('  --with-data          ' + TRes.OptWithData);
   Writeln('  --with-data-diff     ' + TRes.OptDataDiff);
   Writeln('                       (INSERT/UPDATE/DELETE)');
-  Writeln('  --exclude-tables...  ' + TRes.OptExclude);
+  Writeln('  --exclude-tables=T1,T2... ' + TRes.OptExclude);
   Writeln('                             ' + TRes.OptExcludeDesc);
-  Writeln('  --include-tables...  ' + TRes.OptInclude);
+  Writeln('  --include-tables=T1,T2... ' + TRes.OptInclude);
   Writeln('                             ' + TRes.OptIncludeDesc);
+  Writeln('  --preserve-views=V1,V2... ' + TRes.OptPreserveViews);
+  Writeln('  --output=file.sql         ' + TRes.OptOutput);
+  Writeln('  --encoding=utf8bom|utf8nobom|ansi|unicode ' + TRes.OptEncoding);
   Writeln('');
   // Ejemplos
   Writeln(TRes.ExamplesHeader); // "Ejemplos:"
@@ -50,6 +54,7 @@ begin
   Writeln(Format(TRes.ExIBFilter, ['DBComparerInterBase']));
   Writeln('');
   Writeln(TRes.FooterFile);
+  Writeln('  DBComparerInterBase ... --output=script.sql --encoding=utf8bom');
   Writeln('  DBComparerInterBase ... > script.sql');
   Writeln('');
   Halt(1);
@@ -64,6 +69,9 @@ var
   Options: TComparerOptions;
   SourceHelpers: IDBHelpers;
 begin
+  SourceConn := nil;
+  TargetConn := nil;
+  Options := nil;
   try
     if (ParamCount < 4) then
     begin
@@ -135,7 +143,7 @@ begin
                                          Options);
       try
         Engine.GenerateScript;
-        Writeln(Writer.GetScript);
+        WriteScriptOutput(Writer, Options);
       finally
         Engine.Free;
       end;
@@ -146,6 +154,9 @@ begin
     end;
   except
     on E: Exception do
+    begin
       Writeln(ErrOutput, 'ERROR: ', E.Message);
+      ExitCode := 1;
+    end;
   end;
 end.

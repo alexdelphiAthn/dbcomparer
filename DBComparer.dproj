@@ -195,6 +195,7 @@
         <DCCReference Include="Core.Types.pas"/>
         <DCCReference Include="Providers.MySQL.pas"/>
         <DCCReference Include="ScriptWriters.pas"/>
+        <DCCReference Include="Core.Output.pas"/>
         <DCCReference Include="Providers.MySQL.Helpers.pas"/>
         <DCCReference Include="Core.Resources.pas"/>
         <BuildConfiguration Include="Base">

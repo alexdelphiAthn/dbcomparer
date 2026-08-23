@@ -10,6 +10,7 @@ uses
   Core.Types in 'Core.Types.pas',
   Providers.PostgreSQL in 'Providers.PostgreSQL.pas',
   ScriptWriters in 'ScriptWriters.pas',
+  Core.Output in 'Core.Output.pas',
   Providers.PostgreSQL.Helpers in 'Providers.PostgreSQL.Helpers.pas',
   System.SysUtils,
   Core.Resources in 'Core.Resources.pas';
@@ -17,7 +18,7 @@ uses
 procedure ShowUsage;
 begin
  Writeln(TRes.UsageHeader); // "Uso:"
-  Writeln(Format(TRes.UsagePGCmd, ['DBComparerPostgreSQL']));
+  Writeln(Format(TRes.UsagePGCmd, ['DBComparerPostGre']));
   Writeln('');
 
   // Nota del puerto (Reutilizamos la variable genérica pasando 5432)
@@ -38,29 +39,33 @@ begin
   Writeln('                             ' + TRes.OptExcludeDesc);
   Writeln('  --include-tables=... ' + TRes.OptInclude);
   Writeln('                             ' + TRes.OptIncludeDesc);
+  Writeln('  --preserve-views=V1,V2... ' + TRes.OptPreserveViews);
+  Writeln('  --output=file.sql         ' + TRes.OptOutput);
+  Writeln('  --encoding=utf8bom|utf8nobom|ansi|unicode ' + TRes.OptEncoding);
   Writeln('');
 
   // Ejemplos
   Writeln(TRes.ExamplesHeader); // "Ejemplos:"
 
   // Ejemplo 1: Localhost completo
-  Writeln(Format(TRes.ExPGFull, ['DBComparerPostgreSQL']));
+  Writeln(Format(TRes.ExPGFull, ['DBComparerPostGre']));
   Writeln('');
 
   // Ejemplo 2: Uso de Schemas explícitos
-  Writeln(Format(TRes.ExPGSchema, ['DBComparerPostgreSQL']));
+  Writeln(Format(TRes.ExPGSchema, ['DBComparerPostGre']));
   Writeln('');
 
   // Ejemplo 3: Simple
-  Writeln(Format(TRes.ExPGSimple, ['DBComparerPostgreSQL']));
+  Writeln(Format(TRes.ExPGSimple, ['DBComparerPostGre']));
   Writeln('');
 
   // Ejemplo 4: Filtros
-  Writeln(Format(TRes.ExPGFilter, ['DBComparerPostgreSQL']));
+  Writeln(Format(TRes.ExPGFilter, ['DBComparerPostGre']));
 
   Writeln('');
   Writeln(TRes.FooterFile);
-  Writeln('  DBComparerPostgreSQL ... > script.sql');
+  Writeln('  DBComparerPostGre ... --output=script.sql --encoding=utf8bom');
+  Writeln('  DBComparerPostGre ... > script.sql');
   Writeln('');
   Halt(1);
 end;
@@ -75,6 +80,9 @@ var
   SourceHelpers: IDBHelpers;
   SourceSchema, TargetSchema: string;
 begin
+  SourceConn := nil;
+  TargetConn := nil;
+  Options := nil;
   try
     if (ParamCount < 4) then
     begin
@@ -154,7 +162,7 @@ begin
                                          Options);
       try
         Engine.GenerateScript;
-        Writeln(Writer.GetScript);
+        WriteScriptOutput(Writer, Options);
       finally
         Engine.Free;
       end;
@@ -165,6 +173,9 @@ begin
     end;
   except
     on E: Exception do
+    begin
       Writeln(ErrOutput, 'ERROR: ', E.Message);
+      ExitCode := 1;
+    end;
   end;
 end.

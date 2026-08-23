@@ -8,9 +8,9 @@ uses
   Core.Types in 'Core.Types.pas',
   Providers.MySQL in 'Providers.MySQL.pas',
   ScriptWriters in 'ScriptWriters.pas',
+  Core.Output in 'Core.Output.pas',
   Providers.MySQL.Helpers in 'Providers.MySQL.Helpers.pas',
   System.SysUtils,
-  System.IOUtils,
   Core.Resources in 'Core.Resources.pas';
 
 procedure ShowUsage;
@@ -28,9 +28,9 @@ begin
   Writeln('                            ' + TRes.OptExcludeDesc);
   Writeln('  --include-tables=T1,T2...  '+ TRes.OptInclude);
   Writeln('                             '+ TRes.OptIncludeDesc);
-  Writeln('  --preserve-views=V1,V2...   No reemplazar estas vistas del destino');
-  Writeln('  --output=archivo.sql       ' + TRes.OptOutput);
-  Writeln('  --encoding=formato         ' + TRes.OptEncoding);
+  Writeln('  --preserve-views=V1,V2... ' + TRes.OptPreserveViews);
+  Writeln('  --output=file.sql         ' + TRes.OptOutput);
+  Writeln('  --encoding=utf8bom|utf8nobom|ansi|unicode ' + TRes.OptEncoding);
   Writeln('');
   Writeln(TRes.ExamplesHeader);
   Writeln('  DBComparer localhost:3306\origin_dev root\pass123 '+
@@ -42,6 +42,7 @@ begin
   Writeln('  DBComparer ... --with-data-diff --include-tables=fza_paises,fza_monedas');
   Writeln('');
   Writeln(TRes.FooterFile);
+  Writeln('  DBComparer ... --output=script.sql --encoding=utf8bom');
   Writeln('  DBComparer ... > script.sql');
   Writeln('');
   Halt(1);
@@ -103,36 +104,7 @@ begin
                                          Options);
       try
         Engine.GenerateScript;
-        if Options.OutputFile <> '' then
-        begin
-          var MyEncoding: TEncoding;
-          var FreeEncoding: Boolean := False;
-          if Options.OutputEncoding = 'ansi' then
-            MyEncoding := TEncoding.ANSI
-          else if Options.OutputEncoding = 'unicode' then
-            MyEncoding := TEncoding.Unicode
-          else if Options.OutputEncoding = 'utf8nobom' then
-          begin
-            MyEncoding := TUTF8Encoding.Create(False); // UTF8 sin BOM
-            FreeEncoding := True;
-          end
-          else
-            MyEncoding := TEncoding.UTF8; // Por defecto es UTF-8 con BOM
-          try
-            TFile.WriteAllText(Options.OutputFile, Writer.GetScript,
-                               MyEncoding);
-            Writeln('Script generado exitosamente y guardado en: ',
-                     Options.OutputFile);
-          finally
-            if FreeEncoding then
-              MyEncoding.Free;
-          end;
-        end
-        else
-        begin
-          // Si no se pasó --output, se imprime en consola
-          Writeln(Writer.GetScript);
-        end;
+        WriteScriptOutput(Writer, Options);
 
       finally
         Engine.Free;

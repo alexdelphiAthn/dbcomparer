@@ -8,6 +8,7 @@ uses
   Core.Types in 'Core.Types.pas',
   Providers.SQLServer in 'Providers.SQLServer.pas',
   ScriptWriters in 'ScriptWriters.pas',
+  Core.Output in 'Core.Output.pas',
   Providers.SQLServer.Helpers in 'Providers.SQLServer.Helpers.pas',
   System.SysUtils,
   Core.Resources in 'Core.Resources.pas';
@@ -29,8 +30,10 @@ begin
   Writeln('                            ' + TRes.OptExcludeDesc);
   Writeln('  --include-tables=T1,T2...  '+ TRes.OptInclude);
   Writeln('                             '+ TRes.OptIncludeDesc);
+  Writeln('  --preserve-views=V1,V2... ' + TRes.OptPreserveViews);
+  Writeln('  --output=file.sql         ' + TRes.OptOutput);
+  Writeln('  --encoding=utf8bom|utf8nobom|ansi|unicode ' + TRes.OptEncoding);
   Writeln('');
-  Writeln(TRes.ExamplesHeader);
 // Ejemplos específicos SQL Server
   Writeln(TRes.ExamplesHeader); // "Ejemplos:"
   Writeln(Format(TRes.ExSQLNamedInst, ['DBComparerSQLServer']));
@@ -42,6 +45,7 @@ begin
   Writeln(Format(TRes.ExSQLFilter, ['DBComparerSQLServer']));
   Writeln('');
   Writeln(TRes.FooterFile);
+  Writeln('  DBComparerSQLServer ... --output=script.sql --encoding=utf8bom');
   Writeln('  DBComparerSQLServer ... > script.sql');
   Writeln('');
   Halt(1);
@@ -128,7 +132,7 @@ begin
                                          Options);
       try
         Engine.GenerateScript;
-        Writeln(Writer.GetScript);
+        WriteScriptOutput(Writer, Options);
       finally
         Engine.Free;
       end;
@@ -139,6 +143,9 @@ begin
     end;
   except
     on E: Exception do
+    begin
       Writeln(ErrOutput, 'ERROR: ', E.Message);
+      ExitCode := 1;
+    end;
   end;
 end.

@@ -161,8 +161,9 @@ Este proyecto utiliza **[Devart UniDAC](https://www.devart.com/unidac/)** para c
 ### Sintaxis General
 
 ```bash
-#Se genera el script en la salida estándard, con lo cual hay que redirigirlo con >
-Ejecutable.exe <Origen> <Destino> [Opciones] > archivo_script
+# Por defecto se escribe en stdout; use --output o redirija con >
+Ejecutable.exe <Origen> <Destino> [Opciones] --output=archivo_script.sql
+Ejecutable.exe <Origen> <Destino> [Opciones] > archivo_script.sql
 ```
 
 ### Formato de Conexión
@@ -258,8 +259,10 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 | `--exclude-tables=t1,t2` | ❌ **Lista Negra**: Excluye las tablas especificadas |
 | `--mariadb10` | 🐬 Activa explícitamente la generación SQL compatible con MariaDB 10.2; no hay detección automática de versión. Solo `DBComparer.exe` |
 | `--preserve-views=v1,v2` | Conserva las vistas indicadas: no las elimina ni las recrea. Los nombres no distinguen mayúsculas/minúsculas; si una vista no existe en destino, tampoco se crea |
-| `--output=archivo.sql` | Guarda el script generado directamente en un archivo. Solo `DBComparer.exe` |
-| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | Codificación usada con `--output`; el valor predeterminado es `utf8bom`. Solo `DBComparer.exe` |
+| `--output=archivo.sql` | Guarda el script generado directamente en un archivo |
+| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | Codificación usada con `--output`; el valor predeterminado es `utf8bom` |
+
+`--preserve-views`, `--output` y `--encoding` están disponibles en todos los ejecutables de DBComparer.
 
 `--with-data` y `--with-data-diff` son mutuamente excluyentes. El primero genera un `INSERT` por cada fila de origen sin compararla con destino. El segundo compara por clave primaria; omite las tablas existentes sin PK y, combinado con `--nodelete`, no genera los `DELETE` de registros sobrantes. Los filtros `--include-tables` y `--exclude-tables` se aplican tanto a la estructura como a los datos de las tablas; si una tabla aparece en ambas listas, prevalece `--exclude-tables`.
 
@@ -296,6 +299,9 @@ La conversión a `utf8mb4_spanish_ci` puede cambiar las reglas de comparación y
 
 # MariaDB 10.2 con --nodelete, conservando vistas gestionadas externamente
 --mariadb10 --nodelete --preserve-views=vw_legacy,vw_reporting
+
+# SQL Server: conservar una vista y guardar el script sin BOM
+DBComparerSQLServer.exe servidor\origen usuario\clave servidor\destino usuario\clave --preserve-views=vw_legacy --output=script.sql --encoding=utf8nobom
 ```
 
 ---
@@ -539,8 +545,9 @@ DBComparer\Win32\Release\DBComparer.exe
 ### General Syntax
 
 ```bash
-# The script is generated to standard output, so redirect it with >
-Executable.exe <Source> <Target> [Options] > script_file
+# By default the script is written to stdout; use --output or redirect with >
+Executable.exe <Source> <Target> [Options] --output=script_file.sql
+Executable.exe <Source> <Target> [Options] > script_file.sql
 
 ```
 
@@ -644,8 +651,10 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 | `--exclude-tables=t1,t2` | ❌ **Blacklist**: Exclude specified tables |
 | `--mariadb10` | 🐬 Opt-in SQL generation compatible with MariaDB 10.2; the server version is not auto-detected. `DBComparer.exe` only |
 | `--preserve-views=v1,v2` | Skips the listed views: they are neither dropped nor recreated, and missing views are not created. Names are case-insensitive |
-| `--output=file.sql` | Saves the generated script directly to a file. `DBComparer.exe` only |
-| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | Output encoding used with `--output`; defaults to `utf8bom`. `DBComparer.exe` only |
+| `--output=file.sql` | Saves the generated script directly to a file |
+| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | Output encoding used with `--output`; defaults to `utf8bom` |
+
+`--preserve-views`, `--output`, and `--encoding` are available in every DBComparer executable.
 
 `--with-data` and `--with-data-diff` are mutually exclusive. The first generates one `INSERT` per source row without comparing it with the target. The second compares rows by primary key; existing tables without a PK are skipped and, when combined with `--nodelete`, no `DELETE` statements are generated for target-only rows. The `--include-tables` and `--exclude-tables` filters apply to both table schema and table data; if a table appears in both lists, `--exclude-tables` takes precedence.
 
@@ -905,8 +914,9 @@ DBComparer\Win32\Release\DBComparer.exe
 ### Syntaxe générale
 
 ```bash
-# Le script est généré sur la sortie standard, il faut donc le rediriger avec >
-Executable.exe <Source> <Cible> [Options] > fichier_script
+# Par défaut, le script est écrit sur stdout ; utilisez --output ou redirigez avec >
+Executable.exe <Source> <Cible> [Options] --output=fichier_script.sql
+Executable.exe <Source> <Cible> [Options] > fichier_script.sql
 
 ```
 
@@ -1010,8 +1020,10 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 | `--exclude-tables=t1,t2` | ❌ **Liste noire** : Exclut les tables spécifiées |
 | `--mariadb10` | Active explicitement la génération SQL compatible avec MariaDB 10.2 ; aucune détection automatique. Uniquement avec `DBComparer.exe` |
 | `--preserve-views=v1,v2` | Ignore les vues indiquées : elles ne sont ni supprimées ni recréées, et les vues absentes ne sont pas créées. Noms insensibles à la casse |
-| `--output=fichier.sql` | Enregistre directement le script généré dans un fichier. Uniquement avec `DBComparer.exe` |
-| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | Encodage utilisé avec `--output` ; `utf8bom` par défaut. Uniquement avec `DBComparer.exe` |
+| `--output=fichier.sql` | Enregistre directement le script généré dans un fichier |
+| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | Encodage utilisé avec `--output` ; `utf8bom` par défaut |
+
+`--preserve-views`, `--output` et `--encoding` sont disponibles dans tous les exécutables DBComparer.
 
 Pour les effets techniques et les limites, voir [MariaDB 10.2 compatibility](#mariadb-102-compatibility) (en anglais).
 
@@ -1251,8 +1263,9 @@ DBComparer\Win32\Release\DBComparer.exe
 ### Allgemeine Syntax
 
 ```bash
-# Das Skript wird auf der Standardausgabe ausgegeben, daher muss es mit > umgeleitet werden
-Executable.exe <Quelle> <Ziel> [Optionen] > skript_datei
+# Standardmäßig wird das Skript auf stdout geschrieben; verwenden Sie --output oder >
+Executable.exe <Quelle> <Ziel> [Optionen] --output=skript_datei.sql
+Executable.exe <Quelle> <Ziel> [Optionen] > skript_datei.sql
 
 ```
 
@@ -1356,8 +1369,10 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 | `--exclude-tables=t1,t2` | ❌ **Blacklist**: Schließt angegebene Tabellen aus |
 | `--mariadb10` | Aktiviert explizit die SQL-Erzeugung für MariaDB 10.2; keine automatische Erkennung. Nur für `DBComparer.exe` |
 | `--preserve-views=v1,v2` | Überspringt die angegebenen Views: Sie werden weder gelöscht noch neu erstellt; fehlende Views werden ebenfalls nicht erstellt. Groß-/Kleinschreibung wird ignoriert |
-| `--output=datei.sql` | Speichert das erzeugte Skript direkt in einer Datei. Nur für `DBComparer.exe` |
-| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | Mit `--output` verwendete Ausgabekodierung; Standard ist `utf8bom`. Nur für `DBComparer.exe` |
+| `--output=datei.sql` | Speichert das erzeugte Skript direkt in einer Datei |
+| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | Mit `--output` verwendete Ausgabekodierung; Standard ist `utf8bom` |
+
+`--preserve-views`, `--output` und `--encoding` sind in allen DBComparer-Programmen verfügbar.
 
 Technische Auswirkungen und Einschränkungen finden Sie unter [MariaDB 10.2 compatibility](#mariadb-102-compatibility) (Englisch).
 
@@ -1596,8 +1611,9 @@ DBComparer\Win32\Release\DBComparer.exe
 ### 通用语法
 
 ```bash
-# 脚本生成到标准输出，因此需要使用 > 重定向
-Executable.exe <源> <目标> [选项] > 脚本文件
+# 默认写入标准输出；可使用 --output 或通过 > 重定向
+Executable.exe <源> <目标> [选项] --output=脚本文件.sql
+Executable.exe <源> <目标> [选项] > 脚本文件.sql
 
 ```
 
@@ -1701,8 +1717,10 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 | `--exclude-tables=t1,t2` | ❌ **黑名单**：排除指定的表 |
 | `--mariadb10` | 启用兼容 MariaDB 10.2 的 SQL 生成模式（需显式启用，不会自动检测服务器版本；仅适用于 `DBComparer.exe`） |
 | `--preserve-views=v1,v2` | 不删除或重新创建指定视图（名称不区分大小写）；若目标中不存在，也不会创建 |
-| `--output=output.sql` | 将生成的脚本保存到指定 SQL 文件（仅适用于 `DBComparer.exe`） |
-| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | 设置 `--output` 文件的编码；默认为 `utf8bom`，仅与 `--output` 一起生效，且仅适用于 `DBComparer.exe` |
+| `--output=output.sql` | 将生成的脚本保存到指定 SQL 文件 |
+| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | 设置 `--output` 文件的编码；默认为 `utf8bom`，仅与 `--output` 一起生效 |
+
+`--preserve-views`、`--output` 和 `--encoding` 可用于所有 DBComparer 可执行文件。
 
 有关技术影响和限制，请参阅英文版的 [MariaDB 10.2 compatibility](#mariadb-102-compatibility)。
 
@@ -1942,8 +1960,9 @@ DBComparer\Win32\Release\DBComparer.exe
 ### 일반 구문
 
 ```bash
-# 스크립트는 표준 출력으로 생성되므로 > 를 사용하여 리디렉션해야 합니다
-Executable.exe <원본> <대상> [옵션] > 스크립트_파일
+# 기본적으로 표준 출력에 기록됩니다. --output을 사용하거나 >로 리디렉션하세요
+Executable.exe <원본> <대상> [옵션] --output=스크립트_파일.sql
+Executable.exe <원본> <대상> [옵션] > 스크립트_파일.sql
 
 ```
 
@@ -2047,8 +2066,10 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 | `--exclude-tables=t1,t2` | ❌ **블랙리스트**: 지정된 테이블 제외 |
 | `--mariadb10` | MariaDB 10.2 호환 SQL 생성 모드를 명시적으로 활성화합니다(서버 버전 자동 감지 없음, `DBComparer.exe` 전용) |
 | `--preserve-views=v1,v2` | 지정한 뷰를 삭제하거나 다시 생성하지 않습니다(이름 대/소문자 구분 없음). 대상에 없어도 생성하지 않습니다 |
-| `--output=output.sql` | 생성된 스크립트를 지정한 SQL 파일에 저장합니다(`DBComparer.exe` 전용) |
-| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | `--output` 파일의 인코딩을 설정합니다. 기본값은 `utf8bom`이며 `--output`과 함께 사용할 때만 적용됩니다(`DBComparer.exe` 전용) |
+| `--output=output.sql` | 생성된 스크립트를 지정한 SQL 파일에 저장합니다 |
+| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | `--output` 파일의 인코딩을 설정합니다. 기본값은 `utf8bom`이며 `--output`과 함께 사용할 때만 적용됩니다 |
+
+`--preserve-views`, `--output`, `--encoding`은 모든 DBComparer 실행 파일에서 사용할 수 있습니다.
 
 기술적 영향과 제한 사항은 영어 [MariaDB 10.2 compatibility](#mariadb-102-compatibility)를 참조하세요.
 
@@ -2287,8 +2308,9 @@ DBComparer\Win32\Release\DBComparer.exe
 ### الصيغة العامة
 
 ```bash
-# يتم إنشاء النص البرمجي في الإخراج القياسي، لذا يجب إعادة توجيهه باستخدام <
-Executable.exe <المصدر> <الهدف> [خيارات] > ملف_النص_البرمجي
+# يُكتب افتراضيًا إلى الإخراج القياسي؛ استخدم --output أو أعد التوجيه بواسطة >
+Executable.exe <المصدر> <الهدف> [خيارات] --output=script.sql
+Executable.exe <المصدر> <الهدف> [خيارات] > script.sql
 
 ```
 
@@ -2392,8 +2414,10 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 | `--exclude-tables=t1,t2` | ❌ **القائمة السوداء**: استبعاد الجداول المحددة |
 | `--mariadb10` | وضع يُفعَّل صراحةً لتوليد SQL متوافق مع MariaDB 10.2؛ لا يوجد اكتشاف تلقائي للإصدار، ومتاح فقط في `DBComparer.exe` |
 | `--preserve-views=v1,v2` | لا يحذف طرق العرض المحددة ولا يعيد إنشاءها؛ الأسماء غير حساسة لحالة الأحرف، وطرق العرض غير الموجودة لا يتم إنشاؤها |
-| `--output=output.sql` | يحفظ الناتج في ملف؛ متاح فقط في `DBComparer.exe` |
-| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | ترميز ملف الإخراج؛ يُستخدم فقط مع `--output` وفي `DBComparer.exe`، والقيمة الافتراضية هي `utf8bom` |
+| `--output=output.sql` | يحفظ الناتج مباشرةً في ملف |
+| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | ترميز ملف الإخراج؛ يُستخدم مع `--output`، والقيمة الافتراضية هي `utf8bom` |
+
+تتوفر الخيارات `--preserve-views` و`--output` و`--encoding` في جميع ملفات DBComparer التنفيذية.
 
 للتأثيرات التقنية والقيود، راجع قسم [MariaDB 10.2 compatibility](#mariadb-102-compatibility) باللغة الإنجليزية.
 
@@ -2633,8 +2657,9 @@ DBComparer\Win32\Release\DBComparer.exe
 ### Opća sintaksa
 
 ```bash
-# Skripta se generira na standardni izlaz, stoga je treba preusmjeriti pomoću >
-IzvrsnaDatoteka.exe <Izvor> <Odredište> [Opcije] > datoteka_skripte
+# Skripta se zadano ispisuje na stdout; upotrijebite --output ili preusmjerite s >
+IzvrsnaDatoteka.exe <Izvor> <Odredište> [Opcije] --output=datoteka_skripte.sql
+IzvrsnaDatoteka.exe <Izvor> <Odredište> [Opcije] > datoteka_skripte.sql
 
 ```
 
@@ -2738,8 +2763,10 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 | `--exclude-tables=t1,t2` | ❌ **Crna lista**: Isključuje navedene tablice |
 | `--mariadb10` | Izričito uključuje generiranje SQL-a kompatibilnog s MariaDB 10.2; nema automatskog otkrivanja verzije. Samo za `DBComparer.exe` |
 | `--preserve-views=v1,v2` | Ne briše niti ponovno stvara navedene poglede; nazivi se uspoređuju bez razlikovanja velikih i malih slova, a nepostojeći pogledi se ne stvaraju |
-| `--output=datoteka.sql` | Sprema izlaz u datoteku; dostupno samo u `DBComparer.exe` |
-| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | Kodiranje izlazne datoteke; koristi se samo uz `--output` i u `DBComparer.exe`, zadano je `utf8bom` |
+| `--output=datoteka.sql` | Sprema izlaz izravno u datoteku |
+| `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | Kodiranje izlazne datoteke; koristi se uz `--output`, zadano je `utf8bom` |
+
+`--preserve-views`, `--output` i `--encoding` dostupni su u svim DBComparer izvršnim datotekama.
 
 Za tehničke učinke i ograničenja pogledajte [MariaDB 10.2 compatibility](#mariadb-102-compatibility) (na engleskom).
 
