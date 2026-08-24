@@ -475,7 +475,8 @@ end;
 
 function TMySQLMetadataProvider.StripDefiner(const SQL: string): string;
 var
-  PosDefiner, PosEnd: Integer;
+  PosDefiner, PosEnd, SQLLength: Integer;
+  QuoteChar: Char;
   UpperSQL: string;
 begin
   Result := SQL;
@@ -483,27 +484,39 @@ begin
   PosDefiner := Pos('DEFINER=', UpperSQL);
   if PosDefiner > 0 then
   begin
-    PosEnd := 0;
-    // 1. Buscar PROCEDURE (Prioridad alta para evitar error
-    //    con SQLEXCEPTION en el cuerpo)
-    if (PosEnd = 0) then PosEnd := PosEx('PROCEDURE', UpperSQL, PosDefiner);
-    // 2. Buscar TRIGGER
-    if (PosEnd = 0) then PosEnd := PosEx('TRIGGER', UpperSQL, PosDefiner);
-    // 3. Buscar FUNCTION
-    if (PosEnd = 0) then PosEnd := PosEx('FUNCTION', UpperSQL, PosDefiner);
-    // 4. Buscar VIEW (Esto limpiará también el
-    //    'SQL SECURITY' si está antes del VIEW)
-    if (PosEnd = 0) then PosEnd := PosEx('VIEW', UpperSQL, PosDefiner);
-    // NOTA: Hemos eliminado la búsqueda genérica de 'SQL' porque causaba
-    // falsos positivos con variables o handlers como 'SQLEXCEPTION'.
-    if (PosEnd > 0) then
+    // SHOW CREATE siempre devuelve el definidor como un único token
+    // DEFINER=usuario@host. Se elimina sólo ese token: buscar palabras como
+    // PROCEDURE o VIEW en toda la sentencia confunde literales o consultas
+    // del cuerpo con el tipo real del objeto.
+    SQLLength := Length(SQL);
+    PosEnd := PosDefiner + Length('DEFINER=');
+    QuoteChar := #0;
+    while PosEnd <= SQLLength do
     begin
-      // Cortamos desde el inicio del DEFINER hasta justo antes del
-      // tipo de objeto Y Agregamos un espacio por seguridad para evitar
-      // concatenaciones tipo "UNDEFINEDVIEW"
-      Result := Trim(Copy(Result, 1, PosDefiner - 1) + ' ' +
-                     Copy(Result, PosEnd, Length(Result)));
+      if QuoteChar <> #0 then
+      begin
+        if (SQL[PosEnd] = '\') and (PosEnd < SQLLength) then
+          Inc(PosEnd)
+        else if SQL[PosEnd] = QuoteChar then
+        begin
+          // Los identificadores y literales escapan la comilla duplicándola.
+          if (PosEnd < SQLLength) and (SQL[PosEnd + 1] = QuoteChar) then
+            Inc(PosEnd)
+          else
+            QuoteChar := #0;
+        end;
+      end
+      else if CharInSet(SQL[PosEnd], ['`', '''', '"']) then
+        QuoteChar := SQL[PosEnd]
+      else if CharInSet(SQL[PosEnd], [#9, #10, #13, ' ']) then
+        Break;
+      Inc(PosEnd);
     end;
+    while (PosEnd <= SQLLength) and
+          CharInSet(SQL[PosEnd], [#9, #10, #13, ' ']) do
+      Inc(PosEnd);
+    Result := TrimRight(Copy(SQL, 1, PosDefiner - 1)) + ' ' +
+              TrimLeft(Copy(SQL, PosEnd, MaxInt));
   end;
   if FMariaDB10Compat then
     Result := NormalizeMariaDB10SQL(Result);
