@@ -13,6 +13,7 @@ type
     FHelpers: IDBHelpers;
     procedure CompareTableStructure(const TableName: string);
     procedure CompareTableIndexes(const TableName: string);
+    procedure CompareTableCheckConstraints(const TableName: string);
     procedure CompareTables;
     procedure CompareViews;
     procedure CompareTriggers;
@@ -123,6 +124,7 @@ begin
           FWriter.AddCommand(FHelpers.GenerateIndexDefinition(TableName, Idx));
         end;
       end;
+    CompareTableCheckConstraints(TableName);
   finally
     Table.Free;
     // Indexes es un array dinámico gestionado automáticamente por el compilador,
@@ -311,11 +313,96 @@ begin
     // 3. Comparar Índices (Llamada separada)
     // ---------------------------------------------------------
     CompareTableIndexes(TableName);
+    CompareTableCheckConstraints(TableName);
   finally
     Table1.Free;
     Table2.Free;
   end;
 end;
+
+procedure TDBComparerEngine.CompareTableCheckConstraints(
+  const TableName: string);
+var
+  SourceProvider, TargetProvider: ICheckConstraintMetadataProvider;
+  CheckHelpers: ICheckConstraintHelpers;
+  SourceChecks, TargetChecks: TArray<TCheckConstraintInfo>;
+  Found: Boolean;
+begin
+  if not Supports(FSourceDB, ICheckConstraintMetadataProvider,
+    SourceProvider) then
+    Exit;
+  if not Supports(FTargetDB, ICheckConstraintMetadataProvider,
+    TargetProvider) then
+    Exit;
+  if not Supports(FHelpers, ICheckConstraintHelpers, CheckHelpers) then
+    Exit;
+
+  SourceChecks := SourceProvider.GetTableCheckConstraints(TableName);
+  TargetChecks := TargetProvider.GetTableCheckConstraints(TableName);
+
+  if not FOptions.NoDelete then
+  begin
+    for var I := 0 to High(TargetChecks) do
+    begin
+      Found := False;
+      for var J := 0 to High(SourceChecks) do
+      begin
+        if SameText(SourceChecks[J].ConstraintName,
+          TargetChecks[I].ConstraintName) then
+        begin
+          Found := True;
+          Break;
+        end;
+      end;
+      if not Found then
+      begin
+        FWriter.AddComment('Eliminar restricción CHECK: ' + TableName + '.' +
+          TargetChecks[I].ConstraintName);
+        FWriter.AddCommand(CheckHelpers.GenerateDropCheckConstraintSQL(
+          TableName, TargetChecks[I].ConstraintName));
+      end;
+    end;
+  end;
+
+  for var I := 0 to High(SourceChecks) do
+  begin
+    Found := False;
+    for var J := 0 to High(TargetChecks) do
+    begin
+      if SameText(SourceChecks[I].ConstraintName,
+        TargetChecks[J].ConstraintName) then
+      begin
+        Found := True;
+        if not CheckHelpers.CheckConstraintsAreEqual(SourceChecks[I],
+          TargetChecks[J]) then
+        begin
+          if FOptions.NoDelete then
+            FWriter.AddComment('Restricción CHECK distinta conservada por ' +
+              '--nodelete: ' + TableName + '.' +
+              SourceChecks[I].ConstraintName)
+          else
+          begin
+            FWriter.AddComment('Modificar restricción CHECK: ' + TableName +
+              '.' + SourceChecks[I].ConstraintName);
+            FWriter.AddCommand(CheckHelpers.GenerateDropCheckConstraintSQL(
+              TableName, SourceChecks[I].ConstraintName));
+            FWriter.AddCommand(CheckHelpers.GenerateAddCheckConstraintSQL(
+              TableName, SourceChecks[I]));
+          end;
+        end;
+        Break;
+      end;
+    end;
+    if not Found then
+    begin
+      FWriter.AddComment('Agregar restricción CHECK: ' + TableName + '.' +
+        SourceChecks[I].ConstraintName);
+      FWriter.AddCommand(CheckHelpers.GenerateAddCheckConstraintSQL(
+        TableName, SourceChecks[I]));
+    end;
+  end;
+end;
+
 procedure TDBComparerEngine.CompareTriggers;
 var
   SourceTriggers, TargetTriggers: TArray<TTriggerInfo>;

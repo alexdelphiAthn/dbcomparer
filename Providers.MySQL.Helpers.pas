@@ -1,24 +1,32 @@
 ﻿unit Providers.MySQL.Helpers;
 
 interface
-uses Core.Helpers, Core.Types, System.SysUtils, System.StrUtils,
+uses Core.Helpers, Core.Interfaces, Core.Types, System.SysUtils, System.StrUtils,
   System.Classes, Data.DB, Uni;
 
 function NormalizeMariaDB10SQLText(const SQL: string): string;
 
 type
-  TMySQLHelpers = class(TDBHelpers)
+  TMySQLHelpers = class(TDBHelpers, ICheckConstraintHelpers)
   private
     FMariaDB10Compat: Boolean;
     function IsGeneratedColumn(const Col: TColumnInfo): Boolean;
     function GeneratedStorageClause(const Col: TColumnInfo): string;
     function NormalizeMariaDB10SQL(const SQL: string): string;
+    function NormalizeCheckConstraintClause(const Clause: string): string;
+    function QuoteDynamicSQL(const SQL: string): string;
   public
     constructor Create(const MariaDB10Compat: Boolean = False);
     function QuoteIdentifier(const Identifier: string): string; override;
     function GenerateColumnDefinition(const Col: TColumnInfo): string; override;
     function GenerateIndexDefinition(const TableName: string;
                                      const Idx: TIndexInfo): string; override;
+    function CheckConstraintsAreEqual(const Check1,
+      Check2: TCheckConstraintInfo): Boolean;
+    function GenerateAddCheckConstraintSQL(const TableName: string;
+      const CheckConstraint: TCheckConstraintInfo): string;
+    function GenerateDropCheckConstraintSQL(const TableName,
+      ConstraintName: string): string;
     function NormalizeType(const AType: string): string; override;
     function TriggersAreEqual(const Trg1, Trg2: TTriggerInfo): Boolean; override;
     function GenerateCreateTableSQL(const Table: TTableInfo;
@@ -146,6 +154,122 @@ begin
   if not FMariaDB10Compat then
     Exit;
   Result := NormalizeMariaDB10SQLText(Result);
+end;
+
+function TMySQLHelpers.NormalizeCheckConstraintClause(
+  const Clause: string): string;
+var
+  CurrentChar, QuoteChar: Char;
+  I: Integer;
+begin
+  Result := '';
+  QuoteChar := #0;
+  I := 1;
+  while I <= Length(Clause) do
+  begin
+    CurrentChar := Clause[I];
+    if QuoteChar = #0 then
+    begin
+      if CharInSet(CurrentChar, ['''', '"', '`']) then
+      begin
+        QuoteChar := CurrentChar;
+        Result := Result + CurrentChar;
+      end
+      else if not CharInSet(CurrentChar, [' ', #9, #10, #13]) then
+        Result := Result + LowerCase(string(CurrentChar));
+    end
+    else
+    begin
+      if QuoteChar = '`' then
+        Result := Result + LowerCase(string(CurrentChar))
+      else
+        Result := Result + CurrentChar;
+      if CurrentChar = QuoteChar then
+      begin
+        if (I < Length(Clause)) and (Clause[I + 1] = QuoteChar) then
+        begin
+          Inc(I);
+          if QuoteChar = '`' then
+            Result := Result + LowerCase(string(Clause[I]))
+          else
+            Result := Result + Clause[I];
+        end
+        else
+          QuoteChar := #0;
+      end
+      else if (CurrentChar = '\') and (I < Length(Clause)) then
+      begin
+        Inc(I);
+        Result := Result + Clause[I];
+      end;
+    end;
+    Inc(I);
+  end;
+end;
+
+function TMySQLHelpers.QuoteDynamicSQL(const SQL: string): string;
+begin
+  Result := QuotedStr(StringReplace(SQL, '\', '\\', [rfReplaceAll]));
+end;
+
+function TMySQLHelpers.CheckConstraintsAreEqual(const Check1,
+  Check2: TCheckConstraintInfo): Boolean;
+begin
+  Result := SameText(Check1.ConstraintName, Check2.ConstraintName) and
+    (NormalizeCheckConstraintClause(Check1.CheckClause) =
+     NormalizeCheckConstraintClause(Check2.CheckClause));
+end;
+
+function TMySQLHelpers.GenerateAddCheckConstraintSQL(
+  const TableName: string;
+  const CheckConstraint: TCheckConstraintInfo): string;
+var
+  Command: string;
+begin
+  Command := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
+    ' ADD CONSTRAINT ' + QuoteIdentifier(CheckConstraint.ConstraintName) +
+    ' CHECK (' + NormalizeMariaDB10SQL(CheckConstraint.CheckClause) + ')';
+  if not FMariaDB10Compat then
+    Result := Command + ';'
+  else
+    Result :=
+      'SET @check_exists := (' +
+      'SELECT COUNT(*) FROM information_schema.table_constraints ' +
+      'WHERE constraint_schema = DATABASE() AND table_name = ' +
+      QuotedStr(TableName) + ' AND constraint_name = ' +
+      QuotedStr(CheckConstraint.ConstraintName) +
+      ' AND constraint_type = ''CHECK'');' + sLineBreak +
+      'SET @sql_check := IF(@check_exists = 0, ' +
+      QuoteDynamicSQL(Command) + ', ' + QuoteDynamicSQL('SELECT 1') + ');' +
+      sLineBreak +
+      'PREPARE stmt_check FROM @sql_check;' + sLineBreak +
+      'EXECUTE stmt_check;' + sLineBreak +
+      'DEALLOCATE PREPARE stmt_check;';
+end;
+
+function TMySQLHelpers.GenerateDropCheckConstraintSQL(
+  const TableName, ConstraintName: string): string;
+var
+  Command: string;
+begin
+  Command := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
+    ' DROP CONSTRAINT ' + QuoteIdentifier(ConstraintName);
+  if not FMariaDB10Compat then
+    Result := Command + ';'
+  else
+    Result :=
+      'SET @check_exists := (' +
+      'SELECT COUNT(*) FROM information_schema.table_constraints ' +
+      'WHERE constraint_schema = DATABASE() AND table_name = ' +
+      QuotedStr(TableName) + ' AND constraint_name = ' +
+      QuotedStr(ConstraintName) + ' AND constraint_type = ''CHECK'');' +
+      sLineBreak +
+      'SET @sql_check := IF(@check_exists > 0, ' +
+      QuoteDynamicSQL(Command) + ', ' + QuoteDynamicSQL('SELECT 1') + ');' +
+      sLineBreak +
+      'PREPARE stmt_check FROM @sql_check;' + sLineBreak +
+      'EXECUTE stmt_check;' + sLineBreak +
+      'DEALLOCATE PREPARE stmt_check;';
 end;
 
 function TMySQLHelpers.ValueToSQL(const Field: TField): string;

@@ -23,6 +23,23 @@ type
     function GetSequences: TStringList;
   end;
 
+  // Capacidades opcionales para motores que publican restricciones CHECK.
+  ICheckConstraintMetadataProvider = interface
+    ['{EC1B436C-152B-4AAE-BC14-5162A3B1838A}']
+    function GetTableCheckConstraints(
+      const TableName: string): TArray<TCheckConstraintInfo>;
+  end;
+
+  ICheckConstraintHelpers = interface
+    ['{1120FDF1-A154-40AC-AC4C-31CD6A30C2FA}']
+    function CheckConstraintsAreEqual(const Check1,
+      Check2: TCheckConstraintInfo): Boolean;
+    function GenerateAddCheckConstraintSQL(const TableName: string;
+      const CheckConstraint: TCheckConstraintInfo): string;
+    function GenerateDropCheckConstraintSQL(const TableName,
+      ConstraintName: string): string;
+  end;
+
   // Contrato para escribir el script
   IScriptWriter = interface
     ['{638AC4C1-4AF7-48CF-ACD9-602E3BAC1228}']

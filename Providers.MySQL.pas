@@ -17,7 +17,7 @@ type
   end;
 
   TMySQLMetadataProvider = class(TInterfacedObject, IDBMetadataProvider,
-    IMySQLRoutineMetadataProvider)
+    IMySQLRoutineMetadataProvider, ICheckConstraintMetadataProvider)
   private
     FConn: TUniConnection;
     FDBName: string;
@@ -30,6 +30,8 @@ type
     function GetTables: TStringList;
     function GetTableStructure(const TableName: string): TTableInfo;
     function GetTableIndexes(const TableName: string): TArray<TIndexInfo>;
+    function GetTableCheckConstraints(
+      const TableName: string): TArray<TCheckConstraintInfo>;
     function GetTriggers: TArray<TTriggerInfo>;
     function GetTriggerDefinition(const TriggerName: string): string;
     function GetViews:TStringList;
@@ -246,6 +248,72 @@ begin
   finally
     IndexList.Free;
     ColList.Free;
+  end;
+end;
+
+function TMySQLMetadataProvider.GetTableCheckConstraints(
+  const TableName: string): TArray<TCheckConstraintInfo>;
+var
+  Query: TUniQuery;
+  CheckList: TList<TCheckConstraintInfo>;
+  CheckConstraint: TCheckConstraintInfo;
+  HasTableName: Boolean;
+begin
+  SetLength(Result, 0);
+  CheckList := TList<TCheckConstraintInfo>.Create;
+  Query := TUniQuery.Create(nil);
+  try
+    Query.Connection := FConn;
+    Query.SQL.Text :=
+      'SELECT COUNT(*) AS TABLE_COUNT ' +
+      '  FROM INFORMATION_SCHEMA.TABLES ' +
+      ' WHERE TABLE_SCHEMA = ''information_schema'' ' +
+      '   AND UPPER(TABLE_NAME) = ''CHECK_CONSTRAINTS''';
+    Query.Open;
+    if Query.FieldByName('TABLE_COUNT').AsInteger = 0 then
+      Exit;
+
+    Query.Close;
+    Query.SQL.Text :=
+      'SELECT COUNT(*) AS COLUMN_COUNT ' +
+      '  FROM INFORMATION_SCHEMA.COLUMNS ' +
+      ' WHERE TABLE_SCHEMA = ''information_schema'' ' +
+      '   AND UPPER(TABLE_NAME) = ''CHECK_CONSTRAINTS'' ' +
+      '   AND UPPER(COLUMN_NAME) = ''TABLE_NAME''';
+    Query.Open;
+    HasTableName := Query.FieldByName('COLUMN_COUNT').AsInteger > 0;
+
+    Query.Close;
+    Query.SQL.Text :=
+      'SELECT tc.CONSTRAINT_NAME, cc.CHECK_CLAUSE ' +
+      '  FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc ' +
+      '  JOIN INFORMATION_SCHEMA.CHECK_CONSTRAINTS cc ' +
+      '    ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA ' +
+      '   AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME ';
+    if HasTableName then
+      Query.SQL.Add('   AND cc.TABLE_NAME = tc.TABLE_NAME ');
+    Query.SQL.Add(
+      ' WHERE tc.TABLE_SCHEMA = :DbName ' +
+      '   AND tc.TABLE_NAME = :TbName ' +
+      '   AND tc.CONSTRAINT_TYPE = ''CHECK'' ' +
+      ' ORDER BY tc.CONSTRAINT_NAME');
+    Query.ParamByName('DbName').AsString := FDBName;
+    Query.ParamByName('TbName').AsString := TableName;
+    Query.Open;
+    while not Query.Eof do
+    begin
+      CheckConstraint := Default(TCheckConstraintInfo);
+      CheckConstraint.ConstraintName :=
+        Query.FieldByName('CONSTRAINT_NAME').AsString;
+      CheckConstraint.CheckClause :=
+        Query.FieldByName('CHECK_CLAUSE').AsString;
+      CheckList.Add(CheckConstraint);
+      Query.Next;
+    end;
+    Result := CheckList.ToArray;
+  finally
+    Query.Free;
+    CheckList.Free;
   end;
 end;
 

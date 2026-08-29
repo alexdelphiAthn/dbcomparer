@@ -72,6 +72,7 @@
 |----------|---------------|
 | **Tablas** | Creación, nuevas columnas, modificación de tipos y nulabilidad |
 | **Índices** | Primary Keys, Unique, índices secundarios |
+| **Restricciones CHECK** | Comparación por nombre y expresión; creación, modificación y eliminación |
 | **Vistas** | Comparación y recreación automática |
 | **Procedimientos** | Stored Procedures y Funciones |
 | **Triggers** | Sincronización opcional con `--with-triggers` |
@@ -278,6 +279,8 @@ Sin `--output`, el SQL se escribe en la salida estándar. `--encoding` solo cont
 
 - Usa `IF NOT EXISTS` al crear tablas y al añadir columnas e índices secundarios; las claves primarias usan una comprobación dinámica. Mantiene la posición de las columnas con `FIRST`/`AFTER`.
 - Incluye los índices en las tablas nuevas, conserva su motor y collation, y deriva el juego de caracteres de esa collation; si faltan metadatos, usa `InnoDB` y `utf8mb4_spanish_ci`.
+- Descubre y compara las restricciones `CHECK`. Las altas y bajas consultan `INFORMATION_SCHEMA` antes del DDL, por lo que son repetibles en MariaDB 10.2.
+- Con `--nodelete`, conserva los `CHECK` sobrantes o con una expresión distinta en destino.
 - Normaliza `CURRENT_TIMESTAMP()`, `utf8mb3`, las collations `utf8mb4_uca1400_ai_ci` y `utf8mb3_uca1400_ai_ci`, y determinados `CAST(... AS CHAR CHARSET UTF8MB4)`.
 - Reproduce columnas generadas `VIRTUAL`/`STORED`; en este modo también normaliza sus expresiones.
 - Ajusta `SQL_NOTES`, `FOREIGN_KEY_CHECKS`, `SQL_MODE` y `SET NAMES` para ejecutar el script; restaura los tres primeros al finalizar.
@@ -448,6 +451,7 @@ Consulta el archivo [LICENSE](LICENSE) para más detalles.
 | --- | --- |
 | **Tables** | Creation, new columns, type modification, and nullability |
 | **Indexes** | Primary Keys, Unique, secondary indexes |
+| **CHECK constraints** | Name-and-expression comparison; creation, modification, and removal |
 | **Views** | Comparison and automatic recreation |
 | **Procedures** | Stored Procedures and Functions |
 | **Triggers** | Optional synchronization with `--with-triggers` |
@@ -672,6 +676,8 @@ Without `--output`, SQL is written to standard output. `--encoding` only control
 
 - Uses `IF NOT EXISTS` for table creation and for adding columns and secondary indexes; primary keys use a dynamic existence check. Column order is retained with `FIRST`/`AFTER`.
 - Includes indexes in new tables, preserves their engine and collation, and derives the character set from that collation; missing metadata falls back to `InnoDB` and `utf8mb4_spanish_ci`.
+- Discovers and compares `CHECK` constraints. Adds and drops query `INFORMATION_SCHEMA` before DDL, making them repeatable on MariaDB 10.2.
+- With `--nodelete`, target-only `CHECK` constraints and constraints with a different target expression are preserved.
 - Normalizes `CURRENT_TIMESTAMP()`, `utf8mb3`, the `utf8mb4_uca1400_ai_ci` and `utf8mb3_uca1400_ai_ci` collations, and selected `CAST(... AS CHAR CHARSET UTF8MB4)` expressions.
 - Reproduces `VIRTUAL`/`STORED` generated columns and also normalizes their expressions in this mode.
 - Adjusts `SQL_NOTES`, `FOREIGN_KEY_CHECKS`, `SQL_MODE`, and `SET NAMES` for script execution; the first three are restored at the end.

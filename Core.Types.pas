@@ -31,6 +31,11 @@ type
     Columns: TArray<TIndexColumn>;
   end;
 
+  TCheckConstraintInfo = record
+    ConstraintName: string;
+    CheckClause: string;
+  end;
+
   TTriggerInfo = record
     TriggerName: string;
     EventManipulation: string;
