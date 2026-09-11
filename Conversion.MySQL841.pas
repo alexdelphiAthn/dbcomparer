@@ -78,6 +78,7 @@ type
     function ConvertirCuerpoProcedimiento(
       const ANombre, ACuerpo: string): string;
     function AsegurarSecurityInvoker(const AResto, ASalto: string): string;
+    function EvaluarCollate(const AMatch: TMatch): string;
     function CorregirCollate(const ATexto: string): string;
     function SustituirNombres(const ATexto: string;
       var ACuantos: Integer): string;
@@ -678,29 +679,26 @@ begin
 end;
 
 function TConversorMySQL841.CorregirCollate(const ATexto: string): string;
-var
-  aLineas: TArray<TLineaTexto>;
-  i: Integer;
-  sNueva: string;
 begin
-  aLineas := PartirLineas(ATexto);
-  for i := 0 to High(aLineas) do
-  begin
-    if TRegEx.IsMatch(aLineas[i].Texto, '^\s*(?:DECLARE|IN|OUT|INOUT)\b',
-      [roIgnoreCase]) then
-    begin
-      sNueva := TRegEx.Replace(aLineas[i].Texto,
-        '\b((?:VAR)?CHAR|(?:TINY|MEDIUM|LONG)?TEXT)((?:\s*\(\s*\d+\s*\))?)' +
-        '\s+COLLATE\s+(([A-Za-z0-9]+)_[A-Za-z0-9_]+)',
-        '$1$2 CHARACTER SET $4 COLLATE $3', [roIgnoreCase]);
-      if sNueva <> aLineas[i].Texto then
-      begin
-        Inc(FInforme.DeclaracionesCollate);
-        aLineas[i].Texto := sNueva;
-      end;
-    end;
-  end;
-  Result := UnirLineas(aLineas);
+  // La declaración puede venir partida en varias líneas (el tipo en una y
+  // COLLATE en la siguiente), así que se busca sobre el texto completo. El
+  // grupo 2 no cruza `;` ni paréntesis: no sale del DECLARE ni del parámetro.
+  Result := TRegEx.Replace(ATexto,
+    '\b(DECLARE|IN|OUT|INOUT)\b([^;()]*?)' +
+    '\b((?:VAR)?CHAR|(?:TINY|MEDIUM|LONG)?TEXT)\b((?:\s*\(\s*\d+\s*\))?)' +
+    '(\s+)COLLATE\s+(([A-Za-z0-9]+)_[A-Za-z0-9_]+)', EvaluarCollate,
+    [roIgnoreCase]);
+end;
+
+// Inserta CHARACTER SET delante del COLLATE conservando el espacio o salto
+// de línea original entre el tipo y COLLATE.
+function TConversorMySQL841.EvaluarCollate(const AMatch: TMatch): string;
+begin
+  Inc(FInforme.DeclaracionesCollate);
+  Result := AMatch.Groups[1].Value + AMatch.Groups[2].Value
+    + AMatch.Groups[3].Value + AMatch.Groups[4].Value + ' CHARACTER SET '
+    + AMatch.Groups[7].Value + AMatch.Groups[5].Value + 'COLLATE '
+    + AMatch.Groups[6].Value;
 end;
 
 function TConversorMySQL841.SustituirNombres(const ATexto: string;
