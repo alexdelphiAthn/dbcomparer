@@ -198,6 +198,8 @@
         <DCCReference Include="Core.Output.pas"/>
         <DCCReference Include="Providers.MySQL.Helpers.pas"/>
         <DCCReference Include="Core.Resources.pas"/>
+        <DCCReference Include="Conversion.Sentencias.pas"/>
+        <DCCReference Include="Conversion.MySQL841.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

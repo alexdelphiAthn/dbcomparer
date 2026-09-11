@@ -3,18 +3,42 @@ unit Core.Output;
 interface
 
 uses
+  System.SysUtils,
   Core.Interfaces,
   Core.Types;
 
 procedure WriteScriptOutput(const Writer: IScriptWriter;
   const Options: TComparerOptions);
 
+// Codificación de salida a partir de su nombre (utf8bom, utf8nobom, ansi,
+// unicode). AOwns indica si el llamador debe liberar el objeto devuelto.
+function EncodingFromName(const AName: string;
+  out AOwns: Boolean): TEncoding;
+
 implementation
 
 uses
   System.IOUtils,
-  System.SysUtils,
   Core.Resources;
+
+function EncodingFromName(const AName: string;
+  out AOwns: Boolean): TEncoding;
+begin
+  AOwns := False;
+  if AName = 'ansi' then
+    Result := TEncoding.ANSI
+  else if AName = 'unicode' then
+    Result := TEncoding.Unicode
+  else if AName = 'utf8nobom' then
+  begin
+    Result := TUTF8Encoding.Create(False);
+    AOwns := True;
+  end
+  else if AName = 'utf8bom' then
+    Result := TEncoding.UTF8
+  else
+    raise Exception.CreateFmt('Unsupported output encoding: %s', [AName]);
+end;
 
 procedure WriteScriptOutput(const Writer: IScriptWriter;
   const Options: TComparerOptions);
@@ -28,22 +52,7 @@ begin
     Exit;
   end;
 
-  OwnsEncoding := False;
-  if Options.OutputEncoding = 'ansi' then
-    OutputEncoding := TEncoding.ANSI
-  else if Options.OutputEncoding = 'unicode' then
-    OutputEncoding := TEncoding.Unicode
-  else if Options.OutputEncoding = 'utf8nobom' then
-  begin
-    OutputEncoding := TUTF8Encoding.Create(False);
-    OwnsEncoding := True;
-  end
-  else if Options.OutputEncoding = 'utf8bom' then
-    OutputEncoding := TEncoding.UTF8
-  else
-    raise Exception.CreateFmt('Unsupported output encoding: %s',
-      [Options.OutputEncoding]);
-
+  OutputEncoding := EncodingFromName(Options.OutputEncoding, OwnsEncoding);
   try
     TFile.WriteAllText(Options.OutputFile, Writer.GetScript, OutputEncoding);
     Writeln(Format(TRes.MsgOutputSaved, [Options.OutputFile]));
