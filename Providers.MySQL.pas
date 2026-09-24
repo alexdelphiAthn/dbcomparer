@@ -5,7 +5,7 @@ interface
 uses
   System.Classes, System.SysUtils, Data.DB, Core.Interfaces, Core.Types, Uni,
   MySQLUniProvider, system.StrUtils, System.Generics.Collections,
-  Providers.MySQL.Helpers, Core.Helpers;
+  Providers.MySQL.Helpers, Core.Helpers, Core.Dialecto;
 
 const
     SCHEMADB = 'information_schema';
@@ -21,10 +21,10 @@ type
   private
     FConn: TUniConnection;
     FDBName: string;
-    FMariaDB10Compat: Boolean;
+    FCriterios: TCriteriosDialecto;
   public
     constructor Create(Conn: TUniConnection; const DBName: string;
-      const MariaDB10Compat: Boolean = False);
+      const Criterios: TCriteriosDialecto);
     destructor Destroy; override;
     // Implementación de la interfaz
     function GetTables: TStringList;
@@ -123,11 +123,11 @@ begin
 end;
 
 constructor TMySQLMetadataProvider.Create(Conn: TUniConnection;
-  const DBName: string; const MariaDB10Compat: Boolean);
+  const DBName: string; const Criterios: TCriteriosDialecto);
 begin
 //  FConn := TUniConnection.Create(nil);
   FDBName := DBName;
-  FMariaDB10Compat := MariaDB10Compat;
+  FCriterios := Criterios;
   Fconn := Conn;
   FConn.ProviderName := 'MySQL';
   FConn.Connected := True;
@@ -586,8 +586,7 @@ begin
     Result := TrimRight(Copy(SQL, 1, PosDefiner - 1)) + ' ' +
               TrimLeft(Copy(SQL, PosEnd, MaxInt));
   end;
-  if FMariaDB10Compat then
-    Result := NormalizeMariaDB10SQL(Result);
+  Result := NormalizeMariaDB10SQL(Result);
 end;
 
 function TMySQLMetadataProvider.GetRoutineSQLMode(const RoutineName,
@@ -617,7 +616,7 @@ end;
 function TMySQLMetadataProvider.NormalizeMariaDB10SQL(
   const SQL: string): string;
 begin
-  Result := NormalizeMariaDB10SQLText(SQL);
+  Result := NormalizarSqlParaDestino(SQL, FCriterios);
 end;
 
 

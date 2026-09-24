@@ -9,6 +9,9 @@ uses
 
 procedure WriteScriptOutput(const Writer: IScriptWriter;
   const Options: TComparerOptions);
+// Igual, con el script ya convertido al dialecto del destino.
+procedure WriteScriptText(const AScript: string;
+  const Options: TComparerOptions);
 
 // Codificación de salida a partir de su nombre (utf8bom, utf8nobom, ansi,
 // unicode). AOwns indica si el llamador debe liberar el objeto devuelto.
@@ -42,19 +45,24 @@ end;
 
 procedure WriteScriptOutput(const Writer: IScriptWriter;
   const Options: TComparerOptions);
+begin
+  WriteScriptText(Writer.GetScript, Options);
+end;
+
+procedure WriteScriptText(const AScript: string;
+  const Options: TComparerOptions);
 var
   OutputEncoding: TEncoding;
   OwnsEncoding: Boolean;
 begin
   if Options.OutputFile = '' then
   begin
-    Writeln(Writer.GetScript);
+    Writeln(AScript);
     Exit;
   end;
-
   OutputEncoding := EncodingFromName(Options.OutputEncoding, OwnsEncoding);
   try
-    TFile.WriteAllText(Options.OutputFile, Writer.GetScript, OutputEncoding);
+    TFile.WriteAllText(Options.OutputFile, AScript, OutputEncoding);
     Writeln(Format(TRes.MsgOutputSaved, [Options.OutputFile]));
   finally
     if OwnsEncoding then

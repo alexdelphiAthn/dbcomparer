@@ -2,21 +2,32 @@
 
 interface
 uses Core.Helpers, Core.Interfaces, Core.Types, System.SysUtils, System.StrUtils,
-  System.Classes, Data.DB, Uni;
+  System.Classes, Data.DB, Uni, Core.Dialecto;
 
 function NormalizeMariaDB10SQLText(const SQL: string): string;
+// Aplica al texto las rebajas que pidan los criterios del destino
+// (intercalaciones uca1400, CURRENT_TIMESTAMP(), utf8mb3, OR REPLACE TABLE).
+function NormalizarSqlParaDestino(const SQL: string;
+  const Criterios: TCriteriosDialecto): string;
+// Ejecuta AComando solo si ACuentaExistentes devuelve 0 (o, con
+// ASiExiste, solo si devuelve algo). Es la guarda de los destinos sin
+// IF [NOT] EXISTS: consulta INFORMATION_SCHEMA y ejecuta con PREPARE.
+function GuardarComandoSegunCatalogo(const ACuentaExistentes,
+  AComando: string; ASiExiste: Boolean): string;
 
 type
   TMySQLHelpers = class(TDBHelpers, ICheckConstraintHelpers)
   private
-    FMariaDB10Compat: Boolean;
+    FCriterios: TCriteriosDialecto;
     function IsGeneratedColumn(const Col: TColumnInfo): Boolean;
     function GeneratedStorageClause(const Col: TColumnInfo): string;
     function NormalizeMariaDB10SQL(const SQL: string): string;
     function NormalizeCheckConstraintClause(const Clause: string): string;
-    function QuoteDynamicSQL(const SQL: string): string;
+    function CuentaColumna(const TableName, ColumnName: string): string;
+    function CuentaIndice(const TableName, IndexName: string): string;
+    function PosicionColumna(const ColumnInfo: TColumnInfo): string;
   public
-    constructor Create(const MariaDB10Compat: Boolean = False);
+    constructor Create(const Criterios: TCriteriosDialecto);
     function QuoteIdentifier(const Identifier: string): string; override;
     function GenerateColumnDefinition(const Col: TColumnInfo): string; override;
     function GenerateIndexDefinition(const TableName: string;
@@ -142,18 +153,86 @@ begin
   Result := AddUtf8mb4CastCollations(Result);
 end;
 
-constructor TMySQLHelpers.Create(const MariaDB10Compat: Boolean);
+function NormalizarSqlParaDestino(const SQL: string;
+  const Criterios: TCriteriosDialecto): string;
+begin
+  Result := SQL;
+  if Criterios.QuitarOrReplaceTabla then
+    Result := StringReplace(Result, 'CREATE OR REPLACE TABLE', 'CREATE TABLE',
+      [rfReplaceAll, rfIgnoreCase]);
+  if Criterios.RebajarIntercalaciones then
+  begin
+    Result := StringReplace(Result, 'CURRENT_TIMESTAMP()', 'CURRENT_TIMESTAMP',
+      [rfReplaceAll, rfIgnoreCase]);
+    Result := StringReplace(Result, 'utf8mb4_uca1400_ai_ci',
+      'utf8mb4_spanish_ci', [rfReplaceAll, rfIgnoreCase]);
+    Result := StringReplace(Result, 'utf8mb3_uca1400_ai_ci',
+      'utf8_spanish_ci', [rfReplaceAll, rfIgnoreCase]);
+    Result := StringReplace(Result, 'utf8mb3', 'utf8',
+      [rfReplaceAll, rfIgnoreCase]);
+    Result := AddUtf8mb4CastCollations(Result);
+  end;
+end;
+
+function QuoteDynamicSQL(const SQL: string): string;
+begin
+  Result := QuotedStr(StringReplace(SQL, '\', '\\', [rfReplaceAll]));
+end;
+
+function GuardarComandoSegunCatalogo(const ACuentaExistentes,
+  AComando: string; ASiExiste: Boolean): string;
+var
+  Condicion: string;
+begin
+  if ASiExiste then
+    Condicion := '@fza_existe > 0'
+  else
+    Condicion := '@fza_existe = 0';
+  // DO 0 no devuelve filas: quien ejecuta el script no recibe un
+  // resultado vacío por cada guarda que no hace nada.
+  Result :=
+    'SET @fza_existe := (' + ACuentaExistentes + ');' + sLineBreak +
+    'SET @fza_sql := IF(' + Condicion + ', ' + QuoteDynamicSQL(AComando) +
+    ', ''DO 0'');' + sLineBreak +
+    'PREPARE fza_stmt FROM @fza_sql;' + sLineBreak +
+    'EXECUTE fza_stmt;' + sLineBreak +
+    'DEALLOCATE PREPARE fza_stmt;';
+end;
+
+constructor TMySQLHelpers.Create(const Criterios: TCriteriosDialecto);
 begin
   inherited Create;
-  FMariaDB10Compat := MariaDB10Compat;
+  FCriterios := Criterios;
 end;
 
 function TMySQLHelpers.NormalizeMariaDB10SQL(const SQL: string): string;
 begin
-  Result := SQL;
-  if not FMariaDB10Compat then
-    Exit;
-  Result := NormalizeMariaDB10SQLText(Result);
+  Result := NormalizarSqlParaDestino(SQL, FCriterios);
+end;
+
+function TMySQLHelpers.CuentaColumna(const TableName,
+  ColumnName: string): string;
+begin
+  Result := 'SELECT COUNT(*) FROM information_schema.COLUMNS ' +
+    'WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ' +
+    QuotedStr(TableName) + ' AND COLUMN_NAME = ' + QuotedStr(ColumnName);
+end;
+
+function TMySQLHelpers.CuentaIndice(const TableName,
+  IndexName: string): string;
+begin
+  Result := 'SELECT COUNT(*) FROM information_schema.STATISTICS ' +
+    'WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ' +
+    QuotedStr(TableName) + ' AND INDEX_NAME = ' + QuotedStr(IndexName);
+end;
+
+function TMySQLHelpers.PosicionColumna(const ColumnInfo: TColumnInfo): string;
+begin
+  Result := '';
+  if ColumnInfo.OrdinalPosition = 1 then
+    Result := ' FIRST'
+  else if ColumnInfo.PreviousColumnName <> '' then
+    Result := ' AFTER ' + QuoteIdentifier(ColumnInfo.PreviousColumnName);
 end;
 
 function TMySQLHelpers.NormalizeCheckConstraintClause(
@@ -207,11 +286,6 @@ begin
   end;
 end;
 
-function TMySQLHelpers.QuoteDynamicSQL(const SQL: string): string;
-begin
-  Result := QuotedStr(StringReplace(SQL, '\', '\\', [rfReplaceAll]));
-end;
-
 function TMySQLHelpers.CheckConstraintsAreEqual(const Check1,
   Check2: TCheckConstraintInfo): Boolean;
 begin
@@ -229,22 +303,16 @@ begin
   Command := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
     ' ADD CONSTRAINT ' + QuoteIdentifier(CheckConstraint.ConstraintName) +
     ' CHECK (' + NormalizeMariaDB10SQL(CheckConstraint.CheckClause) + ')';
-  if not FMariaDB10Compat then
-    Result := Command + ';'
-  else
-    Result :=
-      'SET @check_exists := (' +
-      'SELECT COUNT(*) FROM information_schema.table_constraints ' +
-      'WHERE constraint_schema = DATABASE() AND table_name = ' +
-      QuotedStr(TableName) + ' AND constraint_name = ' +
-      QuotedStr(CheckConstraint.ConstraintName) +
-      ' AND constraint_type = ''CHECK'');' + sLineBreak +
-      'SET @sql_check := IF(@check_exists = 0, ' +
-      QuoteDynamicSQL(Command) + ', ' + QuoteDynamicSQL('SELECT 1') + ');' +
-      sLineBreak +
-      'PREPARE stmt_check FROM @sql_check;' + sLineBreak +
-      'EXECUTE stmt_check;' + sLineBreak +
-      'DEALLOCATE PREPARE stmt_check;';
+  // Ningún destino tiene ADD CONSTRAINT IF NOT EXISTS para CHECK: la
+  // guarda es la misma en los tres.
+  Result := GuardarComandoSegunCatalogo(
+    'SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS ' +
+    'WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ' +
+    QuotedStr(TableName) + ' AND CONSTRAINT_NAME = ' +
+    QuotedStr(CheckConstraint.ConstraintName) +
+    ' AND CONSTRAINT_TYPE = ''CHECK''',
+    Command,
+    False);
 end;
 
 function TMySQLHelpers.GenerateDropCheckConstraintSQL(
@@ -254,22 +322,13 @@ var
 begin
   Command := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
     ' DROP CONSTRAINT ' + QuoteIdentifier(ConstraintName);
-  if not FMariaDB10Compat then
-    Result := Command + ';'
-  else
-    Result :=
-      'SET @check_exists := (' +
-      'SELECT COUNT(*) FROM information_schema.table_constraints ' +
-      'WHERE constraint_schema = DATABASE() AND table_name = ' +
-      QuotedStr(TableName) + ' AND constraint_name = ' +
-      QuotedStr(ConstraintName) + ' AND constraint_type = ''CHECK'');' +
-      sLineBreak +
-      'SET @sql_check := IF(@check_exists > 0, ' +
-      QuoteDynamicSQL(Command) + ', ' + QuoteDynamicSQL('SELECT 1') + ');' +
-      sLineBreak +
-      'PREPARE stmt_check FROM @sql_check;' + sLineBreak +
-      'EXECUTE stmt_check;' + sLineBreak +
-      'DEALLOCATE PREPARE stmt_check;';
+  Result := GuardarComandoSegunCatalogo(
+    'SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS ' +
+    'WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ' +
+    QuotedStr(TableName) + ' AND CONSTRAINT_NAME = ' +
+    QuotedStr(ConstraintName) + ' AND CONSTRAINT_TYPE = ''CHECK''',
+    Command,
+    True);
 end;
 
 function TMySQLHelpers.ValueToSQL(const Field: TField): string;
@@ -394,26 +453,29 @@ end;
 
 function TMySQLHelpers.GenerateAddColumnSQL(const TableName: string;
   const ColumnInfo: TColumnInfo): string;
+var
+  Command: string;
+  ConClavePrimaria: Boolean;
 begin
-  Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
-            ' ADD COLUMN ';
-  if FMariaDB10Compat then
-    Result := Result + 'IF NOT EXISTS ';
-  Result := Result + GenerateColumnDefinition(ColumnInfo);
-  if FMariaDB10Compat then
-  begin
-    if ColumnInfo.OrdinalPosition = 1 then
-      Result := Result + ' FIRST'
-    else if ColumnInfo.PreviousColumnName <> '' then
-      Result := Result + ' AFTER ' +
-        QuoteIdentifier(ColumnInfo.PreviousColumnName);
-  end
-  else if (Pos('auto_increment', LowerCase(ColumnInfo.Extra)) > 0) and
-     SameText(ColumnInfo.ColumnKey, 'PRI') then
-  begin
-    Result := Result + ', ADD PRIMARY KEY (' + QuoteIdentifier(ColumnInfo.ColumnName) + ')';
-  end;
-  Result := Result + ';';
+  // Un autoincremento tiene que ser clave en la misma sentencia.
+  ConClavePrimaria :=
+    (Pos('auto_increment', LowerCase(ColumnInfo.Extra)) > 0) and
+    SameText(ColumnInfo.ColumnKey, 'PRI');
+  Command := GenerateColumnDefinition(ColumnInfo) +
+    PosicionColumna(ColumnInfo);
+  if ConClavePrimaria then
+    Command := Command + ', ADD PRIMARY KEY (' +
+      QuoteIdentifier(ColumnInfo.ColumnName) + ')';
+  // IF NOT EXISTS no alcanza a la clave primaria que va detrás: con ella,
+  // también en MariaDB, se mira el catálogo.
+  if FCriterios.SiExisteNativo and not ConClavePrimaria then
+    Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
+      ' ADD COLUMN IF NOT EXISTS ' + Command + ';'
+  else
+    Result := GuardarComandoSegunCatalogo(
+      CuentaColumna(TableName, ColumnInfo.ColumnName),
+      'ALTER TABLE ' + QuoteIdentifier(TableName) + ' ADD COLUMN ' + Command,
+      False);
 end;
 
 function TMySQLHelpers.GenerateColumnDefinition(const Col: TColumnInfo): string;
@@ -514,7 +576,7 @@ function TMySQLHelpers.GenerateCreateTableSQL(const Table: TTableInfo;
   const Indexes: TArray<TIndexInfo>): string;
 var
   i, SeparatorPos: Integer;
-  Definitions, PKList: TStringList;
+  Definitions: TStringList;
   EngineName, TableCollation, CharacterSetName: string;
 
   function IndexColumnList(const Idx: TIndexInfo): string;
@@ -532,37 +594,26 @@ var
 
 begin
   Definitions := TStringList.Create;
-  PKList := TStringList.Create;
   try
     for i := 0 to Table.Columns.Count - 1 do
-    begin
       Definitions.Add(GenerateColumnDefinition(Table.Columns[i]));
-      if SameText(Table.Columns[i].ColumnKey, 'PRI') then
-        PKList.Add(QuoteIdentifier(Table.Columns[i].ColumnName));
-    end;
 
-    if FMariaDB10Compat then
+    // Claves e índices dentro del CREATE: la tabla nace completa y el
+    // IF NOT EXISTS (que entienden los tres destinos) la protege entera.
+    for i := 0 to High(Indexes) do
     begin
-      for i := 0 to High(Indexes) do
-      begin
-        if Indexes[i].IsPrimary then
-          Definitions.Add('PRIMARY KEY (' + IndexColumnList(Indexes[i]) + ')')
-        else if Indexes[i].IsUnique then
-          Definitions.Add('UNIQUE KEY ' + QuoteIdentifier(Indexes[i].IndexName) +
-            ' (' + IndexColumnList(Indexes[i]) + ')')
-        else
-          Definitions.Add('KEY ' + QuoteIdentifier(Indexes[i].IndexName) +
-            ' (' + IndexColumnList(Indexes[i]) + ')');
-      end;
+      if Indexes[i].IsPrimary then
+        Definitions.Add('PRIMARY KEY (' + IndexColumnList(Indexes[i]) + ')')
+      else if Indexes[i].IsUnique then
+        Definitions.Add('UNIQUE KEY ' + QuoteIdentifier(Indexes[i].IndexName) +
+          ' (' + IndexColumnList(Indexes[i]) + ')')
+      else
+        Definitions.Add('KEY ' + QuoteIdentifier(Indexes[i].IndexName) +
+          ' (' + IndexColumnList(Indexes[i]) + ')');
     end;
-    if (not FMariaDB10Compat) and (PKList.Count > 0) then
-      Definitions.Add('PRIMARY KEY (' + PKList.CommaText + ')');
 
-    if FMariaDB10Compat then
-      Result := 'CREATE TABLE IF NOT EXISTS '
-    else
-      Result := 'CREATE TABLE ';
-    Result := Result + QuoteIdentifier(Table.TableName) + ' (' + sLineBreak;
+    Result := 'CREATE TABLE IF NOT EXISTS ' +
+      QuoteIdentifier(Table.TableName) + ' (' + sLineBreak;
     for i := 0 to Definitions.Count - 1 do
     begin
       Result := Result + '  ' + Definitions[i];
@@ -571,26 +622,21 @@ begin
       Result := Result + sLineBreak;
     end;
     Result := Result + ')';
-    if FMariaDB10Compat then
-    begin
-      EngineName := Table.Engine;
-      if EngineName = '' then
-        EngineName := 'InnoDB';
-      TableCollation := NormalizeMariaDB10SQL(Table.TableCollation);
-      if TableCollation = '' then
-        TableCollation := 'utf8mb4_spanish_ci';
-      SeparatorPos := Pos('_', TableCollation);
-      if SeparatorPos > 0 then
-        CharacterSetName := Copy(TableCollation, 1, SeparatorPos - 1)
-      else
-        CharacterSetName := 'utf8mb4';
-      Result := Result + ' ENGINE=' + EngineName + ' DEFAULT CHARSET=' +
-        CharacterSetName + ' COLLATE=' + TableCollation;
-    end;
-    Result := Result + ';';
+    EngineName := Table.Engine;
+    if EngineName = '' then
+      EngineName := 'InnoDB';
+    TableCollation := NormalizeMariaDB10SQL(Table.TableCollation);
+    if TableCollation = '' then
+      TableCollation := 'utf8mb4_spanish_ci';
+    SeparatorPos := Pos('_', TableCollation);
+    if SeparatorPos > 0 then
+      CharacterSetName := Copy(TableCollation, 1, SeparatorPos - 1)
+    else
+      CharacterSetName := 'utf8mb4';
+    Result := Result + ' ENGINE=' + EngineName + ' DEFAULT CHARSET=' +
+      CharacterSetName + ' COLLATE=' + TableCollation + ';';
   finally
     Definitions.Free;
-    PKList.Free;
   end;
 end;
 
@@ -614,8 +660,15 @@ end;
 function TMySQLHelpers.GenerateDropColumnSQL(const TableName,
   ColumnName: string): string;
 begin
-  Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
-            ' DROP COLUMN ' + QuoteIdentifier(ColumnName) + ';';
+  if FCriterios.SiExisteNativo then
+    Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
+      ' DROP COLUMN IF EXISTS ' + QuoteIdentifier(ColumnName) + ';'
+  else
+    Result := GuardarComandoSegunCatalogo(
+      CuentaColumna(TableName, ColumnName),
+      'ALTER TABLE ' + QuoteIdentifier(TableName) +
+      ' DROP COLUMN ' + QuoteIdentifier(ColumnName),
+      True);
 end;
 
 function TMySQLHelpers.GenerateDropFunction(const FuncName: string): string;
@@ -641,23 +694,19 @@ end;
 function TMySQLHelpers.GenerateDropIndexSQL(const TableName, IndexName: string): string;
 begin
   if SameText(IndexName, 'PRIMARY') then
-  begin
-    Result :=
-      'SET @pk_exists := (SELECT COUNT(*) FROM information_schema.table_constraints ' +
-      'WHERE table_schema = DATABASE() AND table_name = ' + QuotedStr(TableName) +
-      ' AND constraint_type = ''PRIMARY KEY'');' + sLineBreak +
-      'SET @sql_drop := IF(@pk_exists > 0, ' +
-      '''ALTER TABLE ' + QuoteIdentifier(TableName) + ' DROP PRIMARY KEY'', ' +
-      '''SELECT "No Primary Key to drop"'');' + sLineBreak +
-      'PREPARE stmt FROM @sql_drop;' + sLineBreak +
-      'EXECUTE stmt;' + sLineBreak +
-      'DEALLOCATE PREPARE stmt;';
-  end
-  else
-  begin
+    Result := GuardarComandoSegunCatalogo(
+      CuentaIndice(TableName, 'PRIMARY'),
+      'ALTER TABLE ' + QuoteIdentifier(TableName) + ' DROP PRIMARY KEY',
+      True)
+  else if FCriterios.SiExisteNativo then
     Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
-              ' DROP INDEX ' + QuoteIdentifier(IndexName) + ';';
-  end;
+      ' DROP INDEX IF EXISTS ' + QuoteIdentifier(IndexName) + ';'
+  else
+    Result := GuardarComandoSegunCatalogo(
+      CuentaIndice(TableName, IndexName),
+      'ALTER TABLE ' + QuoteIdentifier(TableName) +
+      ' DROP INDEX ' + QuoteIdentifier(IndexName),
+      True);
 end;
 
 function TMySQLHelpers.GenerateDropProcedure(const Proc: string): string;
@@ -669,7 +718,7 @@ function TMySQLHelpers.GenerateIndexDefinition(const TableName: string;
                                                const Idx: TIndexInfo): string;
 var
   i: Integer;
-  ColNames: string;
+  ColNames, TipoIndice: string;
 begin
   // Construir la lista de columnas: `col1`, `col2`...
   ColNames := '';
@@ -694,35 +743,28 @@ begin
         '-- ) AS c' +
       '-- );' + sLineBreak + sLineBreak +
       '-- Comprobación dinámica para evitar error si el ADD COLUMN ya creó la PK' + sLineBreak +
-      'SET @pk_exists := (SELECT COUNT(*) FROM information_schema.table_constraints ' +
-      'WHERE table_schema = DATABASE() AND table_name = ' + QuotedStr(TableName) +
-      ' AND constraint_type = ''PRIMARY KEY'');' + sLineBreak +
-      'SET @sql_add := IF(@pk_exists = 0, ' +
-      '''ALTER TABLE ' + QuoteIdentifier(TableName) + ' ADD PRIMARY KEY (' + ColNames + ')'', ' +
-      '''SELECT "Primary Key ya existe"'');' + sLineBreak +
-      'PREPARE stmt FROM @sql_add;' + sLineBreak +
-      'EXECUTE stmt;' + sLineBreak +
-      'DEALLOCATE PREPARE stmt;';
-  end
-  else if Idx.IsUnique then
-  begin
-    // Aplicamos la misma lógica para índices únicos
-    Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
-              ' ADD UNIQUE INDEX ';
-    if FMariaDB10Compat then
-      Result := Result + 'IF NOT EXISTS ';
-    Result := Result + QuoteIdentifier(Idx.IndexName) +
-              ' (' + ColNames + ');';
+      GuardarComandoSegunCatalogo(
+        CuentaIndice(TableName, 'PRIMARY'),
+        'ALTER TABLE ' + QuoteIdentifier(TableName) +
+        ' ADD PRIMARY KEY (' + ColNames + ')',
+        False);
   end
   else
   begin
-    // Índices normales (no requieren unicidad)
-    Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) +
-              ' ADD INDEX ';
-    if FMariaDB10Compat then
-      Result := Result + 'IF NOT EXISTS ';
-    Result := Result + QuoteIdentifier(Idx.IndexName) +
-              ' (' + ColNames + ');';
+    if Idx.IsUnique then
+      TipoIndice := 'UNIQUE INDEX '
+    else
+      TipoIndice := 'INDEX ';
+    if FCriterios.SiExisteNativo then
+      Result := 'ALTER TABLE ' + QuoteIdentifier(TableName) + ' ADD ' +
+        TipoIndice + 'IF NOT EXISTS ' + QuoteIdentifier(Idx.IndexName) +
+        ' (' + ColNames + ');'
+    else
+      Result := GuardarComandoSegunCatalogo(
+        CuentaIndice(TableName, Idx.IndexName),
+        'ALTER TABLE ' + QuoteIdentifier(TableName) + ' ADD ' + TipoIndice +
+        QuoteIdentifier(Idx.IndexName) + ' (' + ColNames + ')',
+        False);
   end;
 end;
 
@@ -759,16 +801,8 @@ begin
   end;
   Result := SanitizeSQL +
             'ALTER TABLE ' + QuoteIdentifier(TableName) +
-            ' MODIFY COLUMN ' + GenerateColumnDefinition(ColumnInfo);
-  if FMariaDB10Compat then
-  begin
-    if ColumnInfo.OrdinalPosition = 1 then
-      Result := Result + ' FIRST'
-    else if ColumnInfo.PreviousColumnName <> '' then
-      Result := Result + ' AFTER ' +
-        QuoteIdentifier(ColumnInfo.PreviousColumnName);
-  end;
-  Result := Result + ';';
+            ' MODIFY COLUMN ' + GenerateColumnDefinition(ColumnInfo) +
+            PosicionColumna(ColumnInfo) + ';';
 end;
 
 end.

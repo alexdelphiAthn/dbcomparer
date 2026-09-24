@@ -258,7 +258,11 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 | `--with-data-diff` | 🔄 Sincronización inteligente por PK (`INSERT`/`UPDATE`/`DELETE`) |
 | `--include-tables=t1,t2` | ✅ **Lista Blanca**: Solo procesa las tablas especificadas |
 | `--exclude-tables=t1,t2` | ❌ **Lista Negra**: Excluye las tablas especificadas |
-| `--mariadb10` | 🐬 Activa explícitamente la generación SQL compatible con MariaDB 10.2; no hay detección automática de versión. Solo `DBComparer.exe` |
+| `--destino=auto\|mariadb12\|mariadb10\|mysql841` | 🐬 Dialecto del SQL emitido. Por defecto `auto`: se decide con `SELECT VERSION()` del destino. Solo `DBComparer.exe` |
+| `--mariadb10` / `--mysql841` | Atajos de `--destino=mariadb10` y `--destino=mysql841` |
+| `--modelo=modelo.sql` | Compara un volcado de Factuzam con una base (ver más abajo). Solo `DBComparer.exe` |
+| `--convertir` | Convierte un volcado al dialecto de `--destino`, sin conectar a nada. Solo `DBComparer.exe` |
+| `--ssl` | Conexión cifrada (`MySQL.Protocol=mpSSL`). Solo `DBComparer.exe` |
 | `--preserve-views=v1,v2` | Conserva las vistas indicadas: no las elimina ni las recrea. Los nombres no distinguen mayúsculas/minúsculas; si una vista no existe en destino, tampoco se crea |
 | `--output=archivo.sql` | Guarda el script generado directamente en un archivo |
 | `--encoding=utf8bom\|utf8nobom\|ansi\|unicode` | Codificación usada con `--output`; el valor predeterminado es `utf8bom` |
@@ -273,9 +277,47 @@ DBComparerInterbase.exe localhost\C:\Data\prod.gdb sysdba\masterkey localhost\C:
 
 Sin `--output`, el SQL se escribe en la salida estándar. `--encoding` solo controla el archivo creado con `--output`; al redirigir con `>`, la codificación depende de la consola. `unicode` genera UTF-16 LE y `ansi` usa la página de códigos ANSI configurada en Windows.
 
-### Compatibilidad con MariaDB 10.2
+### Destino: un único criterio para MariaDB 12, MariaDB 10 y MySQL 8.0.41
 
-`--mariadb10` es un modo opcional y manual para generar un script más compatible con MariaDB 10.2. Al activarlo, DBComparer:
+`DBComparer.exe` emite un script distinto según el servidor que lo va a ejecutar, pero todas las reglas salen de un solo sitio (`Core.Dialecto`), tanto al comparar dos bases como al convertir un volcado:
+
+| Destino | Se detecta con `VERSION()` | Cambios repetibles | Rebaja de sintaxis | Vistas y rutinas |
+|---|---|---|---|---|
+| `mariadb12` | MariaDB 11 o posterior | `IF [NOT] EXISTS` del motor | ninguna | tal cual |
+| `mariadb10` | MariaDB 10.x (también `5.5.5-10.x`) | `IF [NOT] EXISTS` del motor | uca1400, `CURRENT_TIMESTAMP()`, `utf8mb3`, `CREATE OR REPLACE TABLE` | tal cual |
+| `mysql841` | cualquier MySQL | consulta a `INFORMATION_SCHEMA` y `PREPARE` | uca1400, `CURRENT_TIMESTAMP()`, `utf8mb3` | `SQL SECURITY INVOKER`, sin `DEFINER`, sin `@@in_transaction` (sonda `PRC_FZA_EN_TRANSACCION`), `COLLATE` con `CHARACTER SET`, caja declarada de tablas y vistas; `sql_mode` sin los modos que MySQL 8 rechaza |
+
+En los tres, las tablas nuevas se crean con `CREATE TABLE IF NOT EXISTS` y sus índices dentro, las columnas conservan su posición (`FIRST`/`AFTER`) y las restricciones `CHECK` se protegen consultando `INFORMATION_SCHEMA`. El script lleva la cabecera y el pie que ajustan y restauran `SQL_NOTES`, `FOREIGN_KEY_CHECKS` y `SQL_MODE`.
+
+Código de salida: `0` bien, `1` error, `2` hecho pero con avisos (construcciones sin equivalente en el destino, listadas en la salida de error).
+
+La contraseña se puede pasar como `usuario\*`: se toma de la variable de entorno `DBCOMPARER_PASSWORD` y no queda a la vista en la lista de procesos.
+
+#### Comparar con el modelo de una versión (`--modelo`)
+
+```bash
+DBComparer.exe --modelo=factuzam_original.sql 127.0.0.1:3306\factuzam root\* --output=cambios.sql
+```
+
+1. Detecta el dialecto del servidor.
+2. Convierte el volcado (siempre MariaDB 12) a ese dialecto.
+3. Lo carga **sin filas** en un esquema temporal `fza_modelo_tmp_<fecha>_<azar>` del mismo servidor, con la intercalación de la base de trabajo. Hace falta permiso `CREATE` y `DROP` para el usuario.
+4. Compara el temporal con la base y escribe el script. `--nodelete` es implícito: nunca borra lo que el cliente haya añadido.
+5. Borra el temporal, haya ido bien o no.
+
+Es lo que usa el actualizador de Factuzam en la actualización «por comparación».
+
+#### Convertir un volcado (`--convertir`)
+
+```bash
+DBComparer.exe --convertir factuzam_original.sql factuzam_mysql.sql --destino=mysql841
+```
+
+`--mysql841 origen destino` sigue funcionando igual que antes (misma salida, byte a byte).
+
+#### Detalle de `mariadb10`
+
+Al generar para `mariadb10`, DBComparer:
 
 - Usa `IF NOT EXISTS` al crear tablas y al añadir columnas e índices secundarios; las claves primarias usan una comprobación dinámica. Mantiene la posición de las columnas con `FIRST`/`AFTER`.
 - Incluye los índices en las tablas nuevas, conserva su motor y collation, y deriva el juego de caracteres de esa collation; si faltan metadatos, usa `InnoDB` y `utf8mb4_spanish_ci`.
@@ -286,7 +328,7 @@ Sin `--output`, el SQL se escribe en la salida estándar. `--encoding` solo cont
 - Ajusta `SQL_NOTES`, `FOREIGN_KEY_CHECKS`, `SQL_MODE` y `SET NAMES` para ejecutar el script; restaura los tres primeros al finalizar.
 - Respeta el `SQL_MODE` de origen al recrear procedimientos y funciones. Los triggers siguen requiriendo `--with-triggers`.
 
-El modo mejora la idempotencia del DDL de creación, pero no hace que todo el script sea inocuo o repetible: todavía puede contener `DROP`, `MODIFY`, cambios de datos y recreaciones. `--mariadb10` no implica `--nodelete`; incluso con `--nodelete`, las vistas, rutinas y triggers modificados pueden eliminarse y recrearse. Revisa el SQL generado y realiza un backup antes de ejecutarlo.
+El criterio mejora la idempotencia del DDL de creación, pero no hace que todo el script sea inocuo o repetible: todavía puede contener `DROP`, `MODIFY`, cambios de datos y recreaciones. `--destino` no implica `--nodelete` (salvo con `--modelo`); incluso con `--nodelete`, las vistas, rutinas y triggers modificados pueden eliminarse y recrearse. Revisa el SQL generado y realiza un backup antes de ejecutarlo.
 
 La conversión a `utf8mb4_spanish_ci` puede cambiar las reglas de comparación y ordenación respecto al origen. Además, `SET NAMES` no se restaura al final del script, aunque sí se restauran `SQL_NOTES`, `FOREIGN_KEY_CHECKS` y `SQL_MODE`.
 

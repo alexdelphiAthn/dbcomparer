@@ -2,7 +2,8 @@
 
 interface
 uses Core.Interfaces, Core.Types, System.Classes, Core.Helpers, Core.Resources,
-     Generics.Collections, Providers.MySQL.Helpers, Data.DB, System.StrUtils;
+     Generics.Collections, Providers.MySQL.Helpers, Data.DB, System.StrUtils,
+     Core.Dialecto;
 type
   TDBComparerEngine = class
   private
@@ -94,8 +95,6 @@ procedure TDBComparerEngine.CreateNewTable(const TableName: string);
 var
   Table: TTableInfo;
   Indexes: TArray<TIndexInfo>;
-  Idx: TIndexInfo;
-  // Variables eliminadas: i, PKList, ColDef (ya no hacen falta aquí)
 begin
   FWriter.AddComment(TRes.MsgNewTable + TableName);
   // 1. Obtener la estructura y los índices desde el Origen
@@ -108,22 +107,8 @@ begin
     // En lugar de construir el string manualmente aquí, llamamos a la interfaz.
     // Esto ejecutará TMySQLHelpers.GenerateCreateTableSQL
     FWriter.AddCommand(FHelpers.GenerateCreateTableSQL(Table, Indexes));
-    // -----------------------------------------------------------------------
-    // 3. Crear índices secundarios (No Primary Key)
-    // -----------------------------------------------------------------------
-    // Nota: GenerateCreateTableSQL (en MySQL Helper) incluye la Primary Key,
-    // pero habitualmente los índices secundarios se agregan después
-    // o el helper de creación de tabla solo devuelve el 'CREATE TABLE'.
-    // Mantenemos este bucle para asegurar que se crean los índices UNIQUE/KEY.
-    if not FOptions.MariaDB10Compat then
-      for Idx in Indexes do
-      begin
-        if not Idx.IsPrimary then
-        begin
-          FWriter.AddComment(TRes.MsgAddIndex + TableName + '.' + Idx.IndexName);
-          FWriter.AddCommand(FHelpers.GenerateIndexDefinition(TableName, Idx));
-        end;
-      end;
+    // La clave primaria y los índices secundarios ya van dentro del
+    // CREATE TABLE IF NOT EXISTS, en los tres destinos.
     CompareTableCheckConstraints(TableName);
   finally
     Table.Free;
@@ -138,28 +123,24 @@ begin
   FWriter.AddComment(Format(TRes.GeneratedHeader, [DateTimeToStr(Now)]));
   FWriter.AddComment('========================================');
   FWriter.AddCommand('');
-  if FOptions.MariaDB10Compat then
-  begin
-    FWriter.AddCommand('SET @OLD_SQL_NOTES=@@SQL_NOTES;');
-    FWriter.AddCommand('SET SQL_NOTES=0;');
-    FWriter.AddCommand('SET NAMES utf8mb4 COLLATE utf8mb4_spanish_ci;');
-    FWriter.AddCommand('SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS;');
-    FWriter.AddCommand('SET FOREIGN_KEY_CHECKS=0;');
-    FWriter.AddCommand('SET @OLD_SQL_MODE=@@SQL_MODE;');
-    FWriter.AddCommand('SET SQL_MODE=''NO_AUTO_VALUE_ON_ZERO'';');
-  end;
+  FWriter.AddComment('Destino: ' + NombreDialecto(FOptions.Dialecto) +
+    ' (' + DescripcionDialecto(FOptions.Dialecto) + ')');
+  FWriter.AddCommand('SET @OLD_SQL_NOTES=@@SQL_NOTES;');
+  FWriter.AddCommand('SET SQL_NOTES=0;');
+  FWriter.AddCommand('SET NAMES utf8mb4 COLLATE utf8mb4_spanish_ci;');
+  FWriter.AddCommand('SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS;');
+  FWriter.AddCommand('SET FOREIGN_KEY_CHECKS=0;');
+  FWriter.AddCommand('SET @OLD_SQL_MODE=@@SQL_MODE;');
+  FWriter.AddCommand('SET SQL_MODE=''NO_AUTO_VALUE_ON_ZERO'';');
   CompareTables;
   CompareViews;
   CompareProcedures;
   CompareFunctions;
   if FOptions.WithTriggers then
     CompareTriggers;
-  if FOptions.MariaDB10Compat then
-  begin
-    FWriter.AddCommand('SET SQL_MODE=@OLD_SQL_MODE;');
-    FWriter.AddCommand('SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS;');
-    FWriter.AddCommand('SET SQL_NOTES=@OLD_SQL_NOTES;');
-  end;
+  FWriter.AddCommand('SET SQL_MODE=@OLD_SQL_MODE;');
+  FWriter.AddCommand('SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS;');
+  FWriter.AddCommand('SET SQL_NOTES=@OLD_SQL_NOTES;');
 end;
 procedure TDBComparerEngine.CompareTables;
 var
@@ -871,7 +852,7 @@ var
 begin
   SourceProcs := FSourceDB.GetProcedures;
   try
-    HasRoutineMetadata := FOptions.MariaDB10Compat and
+    HasRoutineMetadata :=
       Supports(FSourceDB, IMySQLRoutineMetadataProvider, RoutineMetadata);
     FWriter.AddComment(TRes.MsgHeaderProcs);
     for i := 0 to SourceProcs.Count - 1 do
@@ -882,6 +863,8 @@ begin
       begin
         SQLMode := RoutineMetadata.GetRoutineSQLMode(SourceProcs[i],
           'PROCEDURE');
+        if FOptions.Criterios.ConvertirMySQL841 then
+          SQLMode := FiltrarSqlModeMySQL841(SQLMode);
         FWriter.AddCommand('SET SQL_MODE=' + QuotedStr(SQLMode) + ';');
       end;
       var strProc := FSourceDB.GetProcedureDefinition(SourceProcs[i]);
@@ -903,7 +886,7 @@ var
 begin
   SourceFuncs := FSourceDB.GetFunctions;
   try
-    HasRoutineMetadata := FOptions.MariaDB10Compat and
+    HasRoutineMetadata :=
       Supports(FSourceDB, IMySQLRoutineMetadataProvider, RoutineMetadata);
     FWriter.AddComment(TRes.MsgHeaderFunc);
     for i := 0 to SourceFuncs.Count - 1 do
@@ -915,6 +898,8 @@ begin
       begin
         SQLMode := RoutineMetadata.GetRoutineSQLMode(SourceFuncs[i],
           'FUNCTION');
+        if FOptions.Criterios.ConvertirMySQL841 then
+          SQLMode := FiltrarSqlModeMySQL841(SQLMode);
         FWriter.AddCommand('SET SQL_MODE=' + QuotedStr(SQLMode) + ';');
       end;
       var strFunc := FSourceDB.GetFunctionDefinition(SourceFuncs[i]);

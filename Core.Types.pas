@@ -2,7 +2,8 @@
 
 interface
 
-uses System.Classes, Generics.Collections, system.SysUtils, System.StrUtils;
+uses System.Classes, Generics.Collections, system.SysUtils, System.StrUtils,
+  Core.Dialecto;
 
 type
   TColumnInfo = record
@@ -75,12 +76,20 @@ type
     PreserveViews: TStringList;
     ExtendedInsert: Boolean;
     ExtendedInsertRows: Integer;
-    MariaDB10Compat: Boolean;
+    // Lo pedido en la línea de órdenes (puede ser ddAuto) y los criterios
+    // ya resueltos contra el servidor de destino: todo el SQL generado
+    // pregunta a Criterios, nunca al nombre del dialecto.
+    Dialecto: TDialectoDestino;
+    Criterios: TCriteriosDialecto;
 
     OutputFile: string;
     OutputEncoding: string;
 
-    class function ParseFromCLI: TComparerOptions;
+    // APrimero: el primer parámetro que ya no es de conexión.
+    class function ParseFromCLI(
+      APrimero: Integer = 5): TComparerOptions;
+    // Con ddAuto, el dialecto sale de SELECT VERSION() del destino.
+    procedure ResolverDialecto(const AVersionDestino: string);
 
     constructor Create;
     destructor Destroy; override;
@@ -121,7 +130,8 @@ begin
   inherited;
 end;
 
-class function TComparerOptions.ParseFromCLI: TComparerOptions;
+class function TComparerOptions.ParseFromCLI(
+  APrimero: Integer): TComparerOptions;
 var
   i: Integer;
   Param, Value: string;
@@ -130,8 +140,8 @@ begin
   Result.ExtendedInsert := True;
   Result.ExtendedInsertRows := 500;
   Result.OutputEncoding := 'utf8bom';
-  // Empezamos desde 5 porque 1..4 son conexión
-  for i := 5 to ParamCount do
+  // Por defecto desde 5: 1..4 son las dos conexiones
+  for i := APrimero to ParamCount do
   begin
     Param := LowerCase(ParamStr(i));
     if Param = '--nodelete' then
@@ -139,7 +149,12 @@ begin
     else if Param = '--with-triggers' then
       Result.WithTriggers := True
     else if Param = '--mariadb10' then
-      Result.MariaDB10Compat := True
+      Result.Dialecto := ddMariaDB10
+    else if Param = '--mysql841' then
+      Result.Dialecto := ddMySQL841
+    else if StartsText('--destino=', Param) then
+      Result.Dialecto := DialectoDesdeNombre(
+        Copy(Param, Length('--destino=') + 1, MaxInt))
     else if Param = '--with-data' then
       Result.WithData := True
     else if Param = '--with-data-diff' then
@@ -169,6 +184,7 @@ begin
                                          Length('--encoding=') + 1, MaxInt));
     end;
   end;
+  Result.Criterios := TCriteriosDialecto.Para(Result.Dialecto);
   // Validación básica
   if Result.WithData and Result.WithDataDiff then
   begin
@@ -187,11 +203,19 @@ begin
   end;
 end;
 
+procedure TComparerOptions.ResolverDialecto(const AVersionDestino: string);
+begin
+  if Dialecto = ddAuto then
+    Dialecto := DialectoDesdeVersion(AVersionDestino);
+  Criterios := TCriteriosDialecto.Para(Dialecto);
+end;
+
 { TConnectionConfig }
 
 class function TConnectionConfig.Parse(const ConnStr, CredStr: string): TConnectionConfig;
 var
-  PartsConn, PartsCred, PartsServer: TArray<string>;
+  PartsConn, PartsServer: TArray<string>;
+  SeparatorPos: Integer;
 begin
   // 1. Parsear "Servidor:Puerto\BaseDeDatos"
   PartsConn := ConnStr.Split(['\']);
@@ -211,13 +235,18 @@ begin
     Result.Server := PartsConn[0];
     Result.Port := 3306; // Puerto por defecto MySQL
   end;
-  // 2. Parsear "Usuario\Password"
-  PartsCred := CredStr.Split(['\']);
-  if Length(PartsCred) <> 2 then
+  // 2. Parsear "Usuario\Password". Se corta en la primera barra: la
+  // contraseña puede llevar otras. Con «*» se toma de la variable de
+  // entorno DBCOMPARER_PASSWORD, para no dejarla a la vista en la lista
+  // de procesos.
+  SeparatorPos := Pos('\', CredStr);
+  if SeparatorPos = 0 then
     raise Exception.CreateFmt('Formato de credenciales incorrecto: "%s".'+
                               ' Use: usuario\password', [CredStr]);
-  Result.Username := PartsCred[0];
-  Result.Password := PartsCred[1];
+  Result.Username := Copy(CredStr, 1, SeparatorPos - 1);
+  Result.Password := Copy(CredStr, SeparatorPos + 1, MaxInt);
+  if Result.Password = '*' then
+    Result.Password := GetEnvironmentVariable('DBCOMPARER_PASSWORD');
 end;
 
 end.
