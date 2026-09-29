@@ -41,6 +41,7 @@ function ConvertirVolcado(const AVolcado: string;
 implementation
 
 uses
+  System.RegularExpressions,
   System.SysUtils,
   Conversion.MySQL841,
   Conversion.Sentencias,
@@ -78,8 +79,18 @@ begin
       if oElemento.Tipo = tevSentencia then
       begin
         oMascara := TTextoEnmascarado.Crear(oElemento.Texto);
-        oSalida.Append(oMascara.Restaurar(
-          NormalizarSqlParaDestino(oMascara.Codigo, ACriterios)));
+        // mysqldump 12 incluye este ajuste de mensajes desde 10.6.16.
+        // Un modelo normalizado puede haber perdido el comentario de
+        // version; se repone sin tocar datos, rutinas ni otros SET.
+        if TRegEx.IsMatch(oMascara.Codigo,
+          '^\s*SET\s+(?:@OLD_NOTE_VERBOSITY\s*=\s*' +
+          '@@NOTE_VERBOSITY\s*,\s*NOTE_VERBOSITY\s*=\s*0|' +
+          'NOTE_VERBOSITY\s*=\s*@OLD_NOTE_VERBOSITY)\s*$',
+          [roIgnoreCase]) then
+          oSalida.Append('/*M!100616 ' + oElemento.Texto + ' */')
+        else
+          oSalida.Append(oMascara.Restaurar(
+            NormalizarSqlParaDestino(oMascara.Codigo, ACriterios)));
         oSalida.Append(oElemento.Terminador);
       end
       else
