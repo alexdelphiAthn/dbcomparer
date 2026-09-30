@@ -60,6 +60,16 @@ function DialectoDesdeVersion(const AVersion: string): TDialectoDestino;
 // Quita de un sql_mode de MariaDB los modos que MySQL 8 no reconoce: con
 // uno solo de ellos, SET SQL_MODE falla y el script se detiene.
 function FiltrarSqlModeMySQL841(const ASqlMode: string): string;
+// Ejecuta AComando solo si ACuentaExistentes devuelve 0 (o, con
+// ASiExiste, solo si devuelve algo). Es la guarda de los destinos sin
+// IF [NOT] EXISTS: consulta INFORMATION_SCHEMA y ejecuta con PREPARE.
+// Cada sentencia acaba en ATerminador y va en su línea (ASalto).
+function GuardarComandoSegunCatalogo(const ACuentaExistentes,
+  AComando: string; ASiExiste: Boolean; const ATerminador: string = ';';
+  const ASalto: string = sLineBreak): string;
+// Consultas de recuento para la guarda anterior.
+function CuentaColumnaCatalogo(const ATabla, AColumna: string): string;
+function CuentaIndiceCatalogo(const ATabla, AIndice: string): string;
 
 implementation
 
@@ -197,6 +207,46 @@ begin
       Result := Result + Trim(sModo);
     end;
   end;
+end;
+
+function QuoteDynamicSQL(const SQL: string): string;
+begin
+  Result := QuotedStr(StringReplace(SQL, '\', '\\', [rfReplaceAll]));
+end;
+
+function GuardarComandoSegunCatalogo(const ACuentaExistentes,
+  AComando: string; ASiExiste: Boolean; const ATerminador: string;
+  const ASalto: string): string;
+var
+  Condicion: string;
+begin
+  if ASiExiste then
+    Condicion := '@fza_existe > 0'
+  else
+    Condicion := '@fza_existe = 0';
+  // DO 0 no devuelve filas: quien ejecuta el script no recibe un
+  // resultado vacío por cada guarda que no hace nada.
+  Result :=
+    'SET @fza_existe := (' + ACuentaExistentes + ')' + ATerminador + ASalto +
+    'SET @fza_sql := IF(' + Condicion + ', ' + QuoteDynamicSQL(AComando) +
+    ', ''DO 0'')' + ATerminador + ASalto +
+    'PREPARE fza_stmt FROM @fza_sql' + ATerminador + ASalto +
+    'EXECUTE fza_stmt' + ATerminador + ASalto +
+    'DEALLOCATE PREPARE fza_stmt' + ATerminador;
+end;
+
+function CuentaColumnaCatalogo(const ATabla, AColumna: string): string;
+begin
+  Result := 'SELECT COUNT(*) FROM information_schema.COLUMNS ' +
+    'WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ' +
+    QuotedStr(ATabla) + ' AND COLUMN_NAME = ' + QuotedStr(AColumna);
+end;
+
+function CuentaIndiceCatalogo(const ATabla, AIndice: string): string;
+begin
+  Result := 'SELECT COUNT(*) FROM information_schema.STATISTICS ' +
+    'WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ' +
+    QuotedStr(ATabla) + ' AND INDEX_NAME = ' + QuotedStr(AIndice);
 end;
 
 end.

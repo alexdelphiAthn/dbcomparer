@@ -14,6 +14,12 @@
 {    base, tipos de MySQL 8, vistas y procedimientos con SQL SECURITY INVOKER  }
 {    y sin DEFINER, CREATE OR REPLACE, COLLATE sin CHARACTER SET, sustitución  }
 {    de @@in_transaction y nombres de tablas y vistas con la caja declarada.   }
+{    Omite los SET de variables de MariaDB, rebaja uca1400, convierte los      }
+{    IF [NOT] EXISTS de índices y columnas en guardas y, si una sentencia usa  }
+{    dos veces una tabla temporal (MySQL no lo admite), la copia antes. Fija   }
+{    la intercalación de la conexión (utf8mb4_spanish_ci) y pasa los SET       }
+{    DEFAULT CURRENT_TIMESTAMP de ALTER COLUMN a MODIFY COLUMN. Las tablas     }
+{    seq_A_to_B (motor SEQUENCE de MariaDB) pasan a una tabla derivada.        }
 {******************************************************************************}
 unit Conversion.MySQL841;
 
@@ -21,7 +27,7 @@ interface
 
 uses
   System.SysUtils, System.Classes, System.Generics.Collections,
-  System.RegularExpressions, Conversion.Sentencias;
+  System.RegularExpressions, Conversion.Sentencias, Core.Dialecto;
 
 type
   TInformeConversionMySQL841 = class
@@ -37,6 +43,12 @@ type
     DeclaracionesCollate: Integer;
     NombresCorregidos: Integer;
     LiteralesDatosCorregidos: Integer;
+    SentenciasSesionOmitidas: Integer;
+    IntercalacionesRebajadas: Integer;
+    GuardasCatalogo: Integer;
+    SentenciasTemporalCopiada: Integer;
+    DefectosTemporalesConvertidos: Integer;
+    SecuenciasConvertidas: Integer;
     constructor Create;
     destructor Destroy; override;
     function Resumen: string;
@@ -47,6 +59,8 @@ type
   TConversorMySQL841 = class
   private
     FNombres: TDictionary<string, string>;
+    // Tablas temporales que crea el volcado (en minúsculas).
+    FTemporales: TDictionary<string, string>;
     FInforme: TInformeConversionMySQL841;
     FSalida: TStringBuilder;
     FSaltoLinea: string;
@@ -55,18 +69,24 @@ type
     FSondaEmitida: Boolean;
     FNotaEmitida: Boolean;
     FIntercalacionEmitida: Boolean;
+    // El script no fija la conexión: se pone SET NAMES delante.
+    FNamesPendiente: Boolean;
     // Estado de los evaluadores de TRegEx.Replace (punteros a método).
     FSaltoCuerpo: string;
     FCuantosTemporal: Integer;
     FCuantosNombres: Integer;
+    FCuantosIntercalacion: Integer;
     function EvaluarSinAncho(const AMatch: TMatch): string;
     function EvaluarDropMasCreate(const AMatch: TMatch): string;
     function EvaluarNombreDeclarado(const AMatch: TMatch): string;
+    function EvaluarUca1400(const AMatch: TMatch): string;
+    function EvaluarSecuencia(const AMatch: TMatch): string;
     procedure Analizar(const AElementos: TArray<TElementoVolcado>);
     procedure RegistrarNombres(const ACodigo: string);
     procedure Emitir(const AElemento: TElementoVolcado);
     procedure EmitirComentario(const AElemento: TElementoVolcado);
     procedure EmitirSentencia(const AElemento: TElementoVolcado);
+    procedure EmitirOmitida(const AElemento: TElementoVolcado);
     procedure EmitirSonda;
     procedure EmitirIntercalacion(const ATerminador: string);
     function ConvertirCodigo(var AMascara: TTextoEnmascarado;
@@ -84,6 +104,15 @@ type
       var ACuantos: Integer): string;
     procedure NormalizarLiteralesDatos(var AMascara: TTextoEnmascarado);
     procedure DetectarNoConvertible(const AObjeto, ACodigo: string);
+    function RebajarUca1400(const AObjeto, ACodigo: string): string;
+    function ProtegerSiExiste(const AMascara: TTextoEnmascarado;
+      const ACodigo: string): string;
+    function CopiarTemporalesReabiertas(const AObjeto,
+      ACodigo: string): string;
+    function ConvertirDefectoTemporal(const AMascara: TTextoEnmascarado;
+      const ACodigo: string): string;
+    procedure CopiarEnFragmento(var ATexto: string; AInicio, AFin: Integer;
+      const ASeparador, AObjeto: string);
   public
     constructor Create;
     destructor Destroy; override;
@@ -132,6 +161,11 @@ const
   VARIABLE_SONDA = 'v_fza_en_transaccion';
   NOTA_CONVERSION = '-- Convertido para MySQL 8.0.41 (Linux, ' +
     'lower_case_table_names=0) por DBComparer --mysql841';
+  // MySQL 8 toma utf8mb4_0900_ai_ci con SET NAMES utf8mb4 a secas: las
+  // rutinas guardan esa intercalación y sus variables chocan con las
+  // columnas de Factuzam ("Illegal mix of collations").
+  INTERCALACION_CONEXION = 'utf8mb4_spanish_ci';
+  SENTENCIA_NAMES = 'SET NAMES utf8mb4 COLLATE ' + INTERCALACION_CONEXION;
 
 implementation
 
@@ -153,6 +187,49 @@ const
   PATRON_BEGIN = '^\s*(?:\w+\s*:\s*)?BEGIN\b';
   PATRON_IDENTIFICADOR = '\b[A-Za-z_][A-Za-z0-9_]*\b';
   TABLAS_CON_SQL_EN_DATOS = 'fza_usuarios_perfiles,fza_informes_guias';
+  // SET de variables que solo tiene MariaDB (mysqldump 10.6.16+ y las
+  // copias de Factuzam): en MySQL fallan con 1193.
+  PATRON_SET_SOLO_MARIADB = '^\s*SET\b[^;]*\bNOTE_VERBOSITY\b';
+  // ALTER COLUMN ... SET DEFAULT solo admite en MySQL un literal o una
+  // expresión entre paréntesis, que queda como now() y no como
+  // CURRENT_TIMESTAMP en INFORMATION_SCHEMA.
+  PATRON_DEFECTO_TEMPORAL = '^\s*ALTER\s+TABLE\s+' + '`?([A-Za-z0-9_]+)`?' +
+    '\s+ALTER\s+(?:COLUMN\s+)?`?([A-Za-z0-9_]+)`?\s+SET\s+DEFAULT\s+' +
+    '(?:CURRENT_TIMESTAMP(?:\s*\(\s*\))?|NOW\s*\(\s*\))\s*$';
+  // FROM/JOIN seq_A_to_B [alias]: tablas virtuales del motor SEQUENCE de
+  // MariaDB (una columna seq). Grupo 5: el alias, si lo hay.
+  PATRON_SECUENCIA = '(\bFROM|\bJOIN|,)(\s*)`?seq_(\d{1,15})_to_(\d{1,15})`?' +
+    '(?![A-Za-z0-9_])(\s+(?:AS\s+)?(?!(?:WHERE|JOIN|LEFT|RIGHT|INNER|CROSS|' +
+    'STRAIGHT_JOIN|NATURAL|ON|USING|GROUP|ORDER|LIMIT|UNION|HAVING|WINDOW|' +
+    'FOR|LOCK|INTO)\b)[A-Za-z_][A-Za-z0-9_]*)?';
+  PATRON_CREAR_TEMPORAL = '\bCREATE\s+(?:OR\s+REPLACE\s+)?TEMPORARY\s+' +
+    'TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?([A-Za-z0-9_]+)`?';
+  // Un script suelto puede usar una temporal que crea otro, pero la
+  // borra con DROP TEMPORARY TABLE: también cuenta.
+  PATRON_BORRAR_TEMPORAL = '\bDROP\s+TEMPORARY\s+TABLE\s+(?:IF\s+EXISTS\s+)?' +
+    '((?:`?[A-Za-z0-9_]+`?\s*,\s*)*`?[A-Za-z0-9_]+`?)';
+  // Tabla que usa una sentencia: tras FROM, JOIN, UPDATE, INTO o una coma
+  // de la lista de tablas (no un calificador tabla.columna).
+  PATRON_USO_TABLA = '(\bFROM|\bJOIN|\bUPDATE|\bINTO|,)\s*`?' +
+    '([A-Za-z0-9_]+)\b`?(?!\s*`?\.)';
+  IDENTIFICADOR = '`?([A-Za-z0-9_]+)`?';
+  PATRON_CREATE_INDEX_SI_NO_EXISTE = '^\s*CREATE\s+(?:UNIQUE\s+|' +
+    'FULLTEXT\s+|SPATIAL\s+)?INDEX\s+(IF\s+NOT\s+EXISTS\s+)' +
+    IDENTIFICADOR + '\s+ON\s+' + IDENTIFICADOR;
+  PATRON_DROP_INDEX_SI_EXISTE = '^\s*DROP\s+INDEX\s+(IF\s+EXISTS\s+)' +
+    IDENTIFICADOR + '\s+ON\s+' + IDENTIFICADOR + '\s*$';
+  // ALTER TABLE con una sola cláusula IF [NOT] EXISTS: grupo 1 la tabla,
+  // grupo 2 la cláusula que se quita y grupo 3 el índice o la columna.
+  PATRON_ALTER_TABLE = '^\s*ALTER\s+TABLE\s+' + IDENTIFICADOR + '\s+';
+  PATRON_ADD_INDEX_SI_NO_EXISTE = 'ADD\s+(?:CONSTRAINT\s+(?:`?\w+`?\s+)?)?' +
+    '(?:UNIQUE\s+(?:INDEX\s+|KEY\s+)?|(?:FULLTEXT\s+|SPATIAL\s+)?' +
+    '(?:INDEX|KEY)\s+)(IF\s+NOT\s+EXISTS\s+)' + IDENTIFICADOR;
+  PATRON_ADD_COLUMNA_SI_NO_EXISTE = 'ADD\s+(?:COLUMN\s+)?' +
+    '(IF\s+NOT\s+EXISTS\s+)' + IDENTIFICADOR;
+  PATRON_DROP_INDEX_ALTER_SI_EXISTE = 'DROP\s+(?:INDEX|KEY)\s+' +
+    '(IF\s+EXISTS\s+)' + IDENTIFICADOR + '\s*$';
+  PATRON_DROP_COLUMNA_SI_EXISTE = 'DROP\s+(?:COLUMN\s+)?' +
+    '(IF\s+EXISTS\s+)' + IDENTIFICADOR + '\s*$';
 
 type
   TConstruccionNoConvertible = record
@@ -292,6 +369,18 @@ begin
       'corregidas: %d', [NombresCorregidos]));
     oTexto.AppendLine(Format('  Literales de datos con nombres de tabla ' +
       'corregidos: %d', [LiteralesDatosCorregidos]));
+    oTexto.AppendLine(Format('  SET de variables de MariaDB omitidos ' +
+      '(NOTE_VERBOSITY): %d', [SentenciasSesionOmitidas]));
+    oTexto.AppendLine(Format('  Intercalaciones uca1400 rebajadas a ' +
+      'spanish_ci: %d', [IntercalacionesRebajadas]));
+    oTexto.AppendLine(Format('  IF [NOT] EXISTS de índices y columnas ' +
+      'convertidos en guarda: %d', [GuardasCatalogo]));
+    oTexto.AppendLine(Format('  Sentencias que usaban dos veces una tabla ' +
+      'temporal (copiada antes): %d', [SentenciasTemporalCopiada]));
+    oTexto.AppendLine(Format('  ALTER COLUMN ... SET DEFAULT CURRENT_TIMESTAMP ' +
+      'pasados a MODIFY COLUMN: %d', [DefectosTemporalesConvertidos]));
+    oTexto.AppendLine(Format('  Tablas seq_A_to_B (SEQUENCE de MariaDB) ' +
+      'convertidas: %d', [SecuenciasConvertidas]));
     oTexto.AppendLine(Format('  Avisos (revisar a mano): %d', [Avisos.Count]));
     for sAviso in Avisos do
       oTexto.AppendLine('    - ' + sAviso);
@@ -309,6 +398,7 @@ constructor TConversorMySQL841.Create;
 begin
   inherited Create;
   FNombres := TDictionary<string, string>.Create;
+  FTemporales := TDictionary<string, string>.Create;
   FInforme := TInformeConversionMySQL841.Create;
   FSalida := TStringBuilder.Create;
   FSaltoLinea := #13#10;
@@ -319,6 +409,7 @@ destructor TConversorMySQL841.Destroy;
 begin
   FreeAndNil(FSalida);
   FreeAndNil(FInforme);
+  FreeAndNil(FTemporales);
   FreeAndNil(FNombres);
   inherited;
 end;
@@ -333,8 +424,10 @@ begin
   FSondaEmitida := False;
   FNotaEmitida := False;
   FIntercalacionEmitida := False;
+  FNamesPendiente := True;
   FNecesitaSonda := False;
   FNombres.Clear;
+  FTemporales.Clear;
   FSalida.Clear;
   FSalida.Capacity := Length(AVolcado) + 4096;
   aElementos := TLectorVolcadoSql.TrocearTexto(AVolcado);
@@ -349,6 +442,8 @@ procedure TConversorMySQL841.Analizar(
 var
   oElemento: TElementoVolcado;
   oMascara: TTextoEnmascarado;
+  oTemporal: TMatch;
+  sNombre, sLimpio: string;
 begin
   for oElemento in AElementos do
   begin
@@ -356,6 +451,21 @@ begin
     begin
       oMascara := TTextoEnmascarado.Crear(oElemento.Texto);
       RegistrarNombres(oMascara.Codigo);
+      if TRegEx.IsMatch(oMascara.Codigo, '^\s*SET\s+NAMES\b',
+        [roIgnoreCase]) then
+        FNamesPendiente := False;
+      for oTemporal in TRegEx.Matches(oMascara.Codigo, PATRON_CREAR_TEMPORAL,
+        [roIgnoreCase]) do
+        FTemporales.AddOrSetValue(LowerCase(oTemporal.Groups[1].Value),
+          oTemporal.Groups[1].Value);
+      for oTemporal in TRegEx.Matches(oMascara.Codigo, PATRON_BORRAR_TEMPORAL,
+        [roIgnoreCase]) do
+        for sNombre in oTemporal.Groups[1].Value.Split([',']) do
+        begin
+          sLimpio := Trim(sNombre).Trim(['`']);
+          if not FTemporales.ContainsKey(LowerCase(sLimpio)) then
+            FTemporales.Add(LowerCase(sLimpio), sLimpio);
+        end;
       if TRegEx.IsMatch(oMascara.Codigo, PATRON_CABECERA_PROCEDIMIENTO,
         [roIgnoreCase])
         and TAdaptadorEnTransaccion.UsaEnTransaccion(oMascara.Codigo) then
@@ -422,19 +532,42 @@ var
   sCodigo, sPrevio: string;
   bProcedimiento: Boolean;
 begin
+  if FNamesPendiente then
+  begin
+    FSalida.Append(SENTENCIA_NAMES).Append(FDelimitador).Append(FSaltoLinea);
+    FNamesPendiente := False;
+  end;
   oMascara := TTextoEnmascarado.Crear(AElemento.Texto);
-  bProcedimiento := TRegEx.IsMatch(oMascara.Codigo,
-    '^\s*(?:DROP\s+PROCEDURE|CREATE\s+(?:OR\s+REPLACE\s+)?' +
-    '(?:DEFINER\s*=\s*\S+\s+)?PROCEDURE)\b', [roIgnoreCase]);
-  if bProcedimiento and FNecesitaSonda and not FSondaEmitida then
-    EmitirSonda;
-  sCodigo := ConvertirCodigo(oMascara, sPrevio);
-  if sPrevio <> '' then
-    FSalida.Append(sPrevio).Append(AElemento.Terminador).Append(FSaltoLinea);
-  FSalida.Append(oMascara.Restaurar(sCodigo)).Append(AElemento.Terminador);
-  if not FIntercalacionEmitida
-    and TRegEx.IsMatch(sCodigo, '^\s*SET\s+NAMES\b', [roIgnoreCase]) then
-    EmitirIntercalacion(AElemento.Terminador);
+  if TRegEx.IsMatch(oMascara.Codigo, PATRON_SET_SOLO_MARIADB,
+    [roIgnoreCase]) then
+    EmitirOmitida(AElemento)
+  else
+  begin
+    bProcedimiento := TRegEx.IsMatch(oMascara.Codigo,
+      '^\s*(?:DROP\s+PROCEDURE|CREATE\s+(?:OR\s+REPLACE\s+)?' +
+      '(?:DEFINER\s*=\s*\S+\s+)?PROCEDURE)\b', [roIgnoreCase]);
+    if bProcedimiento and FNecesitaSonda and not FSondaEmitida then
+      EmitirSonda;
+    sCodigo := ConvertirCodigo(oMascara, sPrevio);
+    if sPrevio <> '' then
+      FSalida.Append(sPrevio).Append(AElemento.Terminador)
+        .Append(FSaltoLinea);
+    FSalida.Append(oMascara.Restaurar(sCodigo)).Append(AElemento.Terminador);
+    if not FIntercalacionEmitida
+      and TRegEx.IsMatch(sCodigo, '^\s*SET\s+NAMES\b', [roIgnoreCase]) then
+      EmitirIntercalacion(AElemento.Terminador);
+  end;
+end;
+
+// La sentencia queda como comentario de bloque, sin terminador: no deja
+// una sentencia vacía y no se come lo que venga detrás en la misma línea.
+procedure TConversorMySQL841.EmitirOmitida(const AElemento: TElementoVolcado);
+begin
+  FSalida.Append('/* Omitido por la conversión (NOTE_VERBOSITY solo existe ')
+    .Append('en MariaDB): ')
+    .Append(TRegEx.Replace(AElemento.Texto, '\s+', ' ').Trim)
+    .Append(' */');
+  Inc(FInforme.SentenciasSesionOmitidas);
 end;
 
 procedure TConversorMySQL841.EmitirIntercalacion(const ATerminador: string);
@@ -489,6 +622,20 @@ end;
 //   TConversorMySQL841: reglas por sentencia
 // ============================================================================
 
+// Nombre del objeto para los avisos: el procedimiento o el principio de
+// la sentencia.
+function DescribirObjeto(const ACodigo: string): string;
+var
+  oCabecera: TMatch;
+begin
+  oCabecera := TRegEx.Match(ACodigo, PATRON_CABECERA_PROCEDIMIENTO,
+    [roIgnoreCase]);
+  if oCabecera.Success then
+    Result := 'Procedimiento ' + oCabecera.Groups[5].Value
+  else
+    Result := Copy(Trim(ACodigo), 1, 60);
+end;
+
 function TConversorMySQL841.ConvertirCodigo(var AMascara: TTextoEnmascarado;
   out APrevio: string): string;
 var
@@ -497,7 +644,7 @@ var
 begin
   APrevio := '';
   sCodigo := AMascara.Codigo;
-  sObjeto := Copy(Trim(sCodigo), 1, 60);
+  sObjeto := DescribirObjeto(sCodigo);
   oInsert := TRegEx.Match(sCodigo, PATRON_INSERT, [roIgnoreCase]);
   if oInsert.Success then
   begin
@@ -507,6 +654,12 @@ begin
   end
   else
   begin
+    sCodigo := RebajarUca1400(sObjeto, sCodigo);
+    sCodigo := TRegEx.Replace(sCodigo, '^(\s*SET\s+NAMES\s+utf8mb4)(\s*)$',
+      '$1 COLLATE ' + INTERCALACION_CONEXION + '$2', [roIgnoreCase]);
+    sCodigo := ConvertirDefectoTemporal(AMascara, sCodigo);
+    sCodigo := TRegEx.Replace(sCodigo, PATRON_SECUENCIA, EvaluarSecuencia,
+      [roIgnoreCase]);
     if TRegEx.IsMatch(sCodigo, PATRON_NOMBRE_TABLA, [roIgnoreCase]) then
       sCodigo := ConvertirCreateTable(sCodigo)
     else if TRegEx.IsMatch(sCodigo, PATRON_VISTA, [roIgnoreCase]) then
@@ -515,6 +668,8 @@ begin
       [roIgnoreCase]) then
       sCodigo := ConvertirProcedimiento(sCodigo, APrevio);
     sCodigo := SustituirNombres(sCodigo, FInforme.NombresCorregidos);
+    sCodigo := CopiarTemporalesReabiertas(sObjeto, sCodigo);
+    sCodigo := ProtegerSiExiste(AMascara, sCodigo);
     DetectarNoConvertible(sObjeto, sCodigo);
   end;
   Result := sCodigo;
@@ -736,19 +891,525 @@ procedure TConversorMySQL841.DetectarNoConvertible(
   const AObjeto, ACodigo: string);
 var
   oConstruccion: TConstruccionNoConvertible;
-  oCabecera: TMatch;
-  sObjeto: string;
 begin
-  sObjeto := AObjeto;
-  oCabecera := TRegEx.Match(ACodigo, PATRON_CABECERA_PROCEDIMIENTO,
-    [roIgnoreCase]);
-  if oCabecera.Success then
-    sObjeto := 'Procedimiento ' + oCabecera.Groups[5].Value;
   for oConstruccion in CONSTRUCCIONES_NO_CONVERTIBLES do
   begin
     if TRegEx.IsMatch(ACodigo, oConstruccion.Patron,
       [roIgnoreCase, roMultiLine]) then
-      FInforme.Avisos.Add(sObjeto + ': ' + oConstruccion.Descripcion);
+      FInforme.Avisos.Add(AObjeto + ': ' + oConstruccion.Descripcion);
+  end;
+end;
+
+// La intercalación de sesión que escribe mysqldump 11+ antes de vistas y
+// rutinas (SET collation_connection = utf8mb4_uca1400_ai_ci) y la de
+// columnas o COLLATE: MySQL 8 no tiene uca1400. Se rebaja como para
+// MariaDB 10; otras variantes de uca1400 se avisan.
+function TConversorMySQL841.RebajarUca1400(
+  const AObjeto, ACodigo: string): string;
+begin
+  FCuantosIntercalacion := 0;
+  Result := TRegEx.Replace(ACodigo, '\b(utf8mb4|utf8mb3|utf8)_uca1400_ai_ci\b',
+    EvaluarUca1400, [roIgnoreCase]);
+  Inc(FInforme.IntercalacionesRebajadas, FCuantosIntercalacion);
+  if ContainsText(Result, '_uca1400_') then
+    FInforme.Avisos.Add(AObjeto + ': intercalación uca1400 sin equivalente ' +
+      'en MySQL 8 (solo se rebaja *_uca1400_ai_ci)');
+end;
+
+// seq_A_to_B como tabla derivada: A más un número de tantas cifras como
+// tenga B - A, sacado del producto de tablas de dígitos, hasta B.
+function TConversorMySQL841.EvaluarSecuencia(const AMatch: TMatch): string;
+var
+  iDesde, iHasta, iPeso: Int64;
+  iCifras, i: Integer;
+  sDigitos, sSuma, sTablas: string;
+begin
+  iDesde := StrToInt64(AMatch.Groups[3].Value);
+  iHasta := StrToInt64(AMatch.Groups[4].Value);
+  if iHasta < iDesde then
+    Result := AMatch.Value
+  else
+  begin
+    sDigitos := '(SELECT 0 AS n UNION ALL SELECT 1 UNION ALL SELECT 2 ' +
+      'UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 ' +
+      'UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 ' +
+      'UNION ALL SELECT 9)';
+    iCifras := Length(IntToStr(iHasta - iDesde));
+    sSuma := IntToStr(iDesde);
+    sTablas := '';
+    iPeso := 1;
+    for i := 0 to iCifras - 1 do
+    begin
+      sSuma := sSuma + ' + d' + IntToStr(i) + '.n * ' + IntToStr(iPeso);
+      if sTablas <> '' then
+        sTablas := sTablas + ' CROSS JOIN ';
+      sTablas := sTablas + sDigitos + ' d' + IntToStr(i);
+      iPeso := iPeso * 10;
+    end;
+    Result := AMatch.Groups[1].Value + AMatch.Groups[2].Value
+      + '(SELECT fza_seq.seq FROM (SELECT ' + sSuma + ' AS seq FROM '
+      + sTablas + ') fza_seq WHERE fza_seq.seq <= ' + IntToStr(iHasta) + ')';
+    if (AMatch.Groups.Count > 5) and AMatch.Groups[5].Success
+      and (AMatch.Groups[5].Value <> '') then
+      Result := Result + AMatch.Groups[5].Value
+    else
+      Result := Result + ' AS seq_' + AMatch.Groups[3].Value + '_to_'
+        + AMatch.Groups[4].Value;
+    Inc(FInforme.SecuenciasConvertidas);
+  end;
+end;
+
+function TConversorMySQL841.EvaluarUca1400(const AMatch: TMatch): string;
+begin
+  Inc(FCuantosIntercalacion);
+  if SameText(AMatch.Groups[1].Value, 'utf8mb4') then
+    Result := 'utf8mb4_spanish_ci'
+  else
+    Result := 'utf8mb3_spanish_ci';
+end;
+
+function TieneComaNivelCero(const ATexto: string): Boolean;
+var
+  iNivel, i: Integer;
+begin
+  Result := False;
+  iNivel := 0;
+  i := 1;
+  while not Result and (i <= Length(ATexto)) do
+  begin
+    case ATexto[i] of
+      '(': Inc(iNivel);
+      ')': Dec(iNivel);
+      ',': Result := iNivel = 0;
+    end;
+    Inc(i);
+  end;
+end;
+
+function SangriaInicial(const ATexto: string): string;
+var
+  i: Integer;
+begin
+  i := 1;
+  while (i <= Length(ATexto)) and CharInSet(ATexto[i], [' ', #9, #13, #10]) do
+    Inc(i);
+  Result := Copy(ATexto, 1, i - 1);
+end;
+
+// ALTER TABLE t MODIFY COLUMN c con el tipo, la nulidad, ON UPDATE y el
+// comentario que tiene la columna en el destino, y DEFAULT
+// CURRENT_TIMESTAMP con su precisión. Es una expresión: devuelve el SQL.
+function ExpresionModificarDefectoTemporal(const ATabla,
+  AColumna: string): string;
+begin
+  Result := '(SELECT CONCAT(''ALTER TABLE `' + ATabla + '` MODIFY COLUMN `'
+    + AColumna + '` '', COLUMN_TYPE, '
+    + 'IF(IS_NULLABLE = ''NO'', '' NOT NULL'', '' NULL''), '
+    + ''' DEFAULT CURRENT_TIMESTAMP'', '
+    + 'IF(IFNULL(DATETIME_PRECISION, 0) > 0, '
+    + 'CONCAT(''('', DATETIME_PRECISION, '')''), ''''), '
+    + 'IF(LOCATE(''on update'', EXTRA) > 0, '
+    + 'CONCAT('' '', SUBSTRING(EXTRA, LOCATE(''on update'', EXTRA))), ''''), '
+    + 'IF(COLUMN_COMMENT <> '''', '
+    + 'CONCAT('' COMMENT '', QUOTE(COLUMN_COMMENT)), '''')) '
+    + 'FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() '
+    + 'AND TABLE_NAME = ''' + ATabla + ''' AND COLUMN_NAME = '''
+    + AColumna + ''')';
+end;
+
+// Suelto se ejecuta con PREPARE; dentro de un literal (SQL dinámico de
+// una guarda) el literal pasa a ser la expresión, salvo tras PREPARE FROM,
+// que solo admite un literal o una variable.
+function TConversorMySQL841.ConvertirDefectoTemporal(
+  const AMascara: TTextoEnmascarado; const ACodigo: string): string;
+var
+  oSuelta, oDinamica: TMatch;
+  oLiterales: TMatchCollection;
+  i, iFragmento: Integer;
+  sExpresion: string;
+begin
+  Result := ACodigo;
+  oSuelta := TRegEx.Match(ACodigo, PATRON_DEFECTO_TEMPORAL, [roIgnoreCase]);
+  if oSuelta.Success then
+  begin
+    Result := SangriaInicial(ACodigo) + 'SET @fza_sql := '
+      + ExpresionModificarDefectoTemporal(oSuelta.Groups[1].Value,
+        oSuelta.Groups[2].Value) + FDelimitador + FSaltoLinea
+      + 'PREPARE fza_stmt FROM @fza_sql' + FDelimitador + FSaltoLinea
+      + 'EXECUTE fza_stmt' + FDelimitador + FSaltoLinea
+      + 'DEALLOCATE PREPARE fza_stmt';
+    Inc(FInforme.DefectosTemporalesConvertidos);
+  end
+  else
+  begin
+    oLiterales := TRegEx.Matches(ACodigo, '''\x01(\d+)\x02''');
+    for i := oLiterales.Count - 1 downto 0 do
+    begin
+      iFragmento := StrToInt(oLiterales[i].Groups[1].Value);
+      oDinamica := TRegEx.Match(AMascara.Fragmento(iFragmento),
+        PATRON_DEFECTO_TEMPORAL, [roIgnoreCase]);
+      if oDinamica.Success
+        and not TRegEx.IsMatch(Copy(Result, 1, oLiterales[i].Index - 1),
+          '\bPREPARE\s+\w+\s+FROM\s*$', [roIgnoreCase]) then
+      begin
+        sExpresion := ExpresionModificarDefectoTemporal(
+          oDinamica.Groups[1].Value, oDinamica.Groups[2].Value);
+        Result := Copy(Result, 1, oLiterales[i].Index - 1) + sExpresion
+          + Copy(Result, oLiterales[i].Index + oLiterales[i].Length, MaxInt);
+        Inc(FInforme.DefectosTemporalesConvertidos);
+      end;
+    end;
+  end;
+end;
+
+// MySQL 8 no tiene CREATE INDEX IF NOT EXISTS, DROP INDEX IF EXISTS ni los
+// IF [NOT] EXISTS de ADD/DROP COLUMN e INDEX en ALTER TABLE. Una sentencia
+// suelta (no dentro de una rutina) con una sola de esas cláusulas pasa a
+// la guarda de Core.Dialecto: consulta INFORMATION_SCHEMA y ejecuta con
+// PREPARE. Con varias cláusulas se deja como está y se avisa.
+function TConversorMySQL841.ProtegerSiExiste(
+  const AMascara: TTextoEnmascarado; const ACodigo: string): string;
+var
+  oCoincidencia, oAlter: TMatch;
+  sTabla, sClausula, sCuenta, sComando, sGuarda: string;
+  iInicio, iLongitud, iDesplazamiento: Integer;
+  bSiExiste: Boolean;
+begin
+  Result := ACodigo;
+  sCuenta := '';
+  bSiExiste := False;
+  oCoincidencia := TRegEx.Match(ACodigo, PATRON_CREATE_INDEX_SI_NO_EXISTE,
+    [roIgnoreCase]);
+  if oCoincidencia.Success then
+    sCuenta := CuentaIndiceCatalogo(oCoincidencia.Groups[3].Value,
+      oCoincidencia.Groups[2].Value)
+  else
+  begin
+    oCoincidencia := TRegEx.Match(ACodigo, PATRON_DROP_INDEX_SI_EXISTE,
+      [roIgnoreCase]);
+    if oCoincidencia.Success then
+    begin
+      sCuenta := CuentaIndiceCatalogo(oCoincidencia.Groups[3].Value,
+        oCoincidencia.Groups[2].Value);
+      bSiExiste := True;
+    end;
+  end;
+  iDesplazamiento := 0;
+  if sCuenta = '' then
+  begin
+    oAlter := TRegEx.Match(ACodigo, PATRON_ALTER_TABLE, [roIgnoreCase]);
+    if oAlter.Success then
+    begin
+      sTabla := oAlter.Groups[1].Value;
+      iDesplazamiento := oAlter.Index + oAlter.Length - 1;
+      sClausula := Copy(ACodigo, iDesplazamiento + 1, MaxInt);
+      if not TieneComaNivelCero(sClausula) then
+      begin
+        oCoincidencia := TRegEx.Match(sClausula,
+          '^' + PATRON_ADD_INDEX_SI_NO_EXISTE, [roIgnoreCase]);
+        if oCoincidencia.Success then
+          sCuenta := CuentaIndiceCatalogo(sTabla,
+            oCoincidencia.Groups[2].Value)
+        else
+        begin
+          oCoincidencia := TRegEx.Match(sClausula,
+            '^' + PATRON_ADD_COLUMNA_SI_NO_EXISTE, [roIgnoreCase]);
+          if oCoincidencia.Success then
+            sCuenta := CuentaColumnaCatalogo(sTabla,
+              oCoincidencia.Groups[2].Value)
+          else
+          begin
+            bSiExiste := True;
+            oCoincidencia := TRegEx.Match(sClausula,
+              '^' + PATRON_DROP_INDEX_ALTER_SI_EXISTE, [roIgnoreCase]);
+            if oCoincidencia.Success then
+              sCuenta := CuentaIndiceCatalogo(sTabla,
+                oCoincidencia.Groups[2].Value)
+            else
+            begin
+              oCoincidencia := TRegEx.Match(sClausula,
+                '^' + PATRON_DROP_COLUMNA_SI_EXISTE, [roIgnoreCase]);
+              if oCoincidencia.Success then
+                sCuenta := CuentaColumnaCatalogo(sTabla,
+                  oCoincidencia.Groups[2].Value);
+            end;
+          end;
+        end;
+      end;
+    end;
+  end;
+  if sCuenta <> '' then
+  begin
+    iInicio := iDesplazamiento + oCoincidencia.Groups[1].Index;
+    iLongitud := oCoincidencia.Groups[1].Length;
+    sComando := Trim(AMascara.Restaurar(Copy(ACodigo, 1, iInicio - 1) +
+      Copy(ACodigo, iInicio + iLongitud, MaxInt)));
+    sGuarda := GuardarComandoSegunCatalogo(sCuenta, sComando, bSiExiste,
+      FDelimitador, FSaltoLinea);
+    // El último terminador lo pone quien emite la sentencia.
+    Result := SangriaInicial(ACodigo) +
+      Copy(sGuarda, 1, Length(sGuarda) - Length(FDelimitador));
+    Inc(FInforme.GuardasCatalogo);
+  end;
+end;
+
+type
+  TSeparadorCuerpo = record
+    Indice: Integer;
+    Longitud: Integer;
+    Texto: string;
+  end;
+
+// Fronteras de sentencia de un cuerpo: los ; y las palabras tras las que
+// empieza otra sentencia (THEN, ELSE, DO, LOOP, REPEAT, BEGIN), salvo
+// dentro de paréntesis o de una expresión CASE ... END.
+function SeparadoresCuerpo(const ACodigo: string): TArray<TSeparadorCuerpo>;
+var
+  oLista: TList<TSeparadorCuerpo>;
+  // True: CASE de expresión; False: sentencia CASE ... END CASE.
+  oCases: TStack<Boolean>;
+  i, iFin, iSiguiente, iNivel: Integer;
+  sPalabra: string;
+  bInicio: Boolean;
+
+  function LeerPalabra(ADesde: Integer; out AFin: Integer): string;
+  begin
+    AFin := ADesde;
+    while (AFin <= Length(ACodigo))
+      and CharInSet(ACodigo[AFin], ['A'..'Z', 'a'..'z', '0'..'9', '_', '$']) do
+      Inc(AFin);
+    Result := UpperCase(Copy(ACodigo, ADesde, AFin - ADesde));
+  end;
+
+  procedure Anadir(AIndice, ALongitud: Integer);
+  var
+    oSeparador: TSeparadorCuerpo;
+  begin
+    oSeparador.Indice := AIndice;
+    oSeparador.Longitud := ALongitud;
+    oSeparador.Texto := Copy(ACodigo, AIndice, ALongitud);
+    oLista.Add(oSeparador);
+    bInicio := True;
+  end;
+
+begin
+  oLista := TList<TSeparadorCuerpo>.Create;
+  oCases := TStack<Boolean>.Create;
+  try
+    iNivel := 0;
+    bInicio := True;
+    i := 1;
+    while i <= Length(ACodigo) do
+    begin
+      if CharInSet(ACodigo[i], ['A'..'Z', 'a'..'z', '_']) then
+      begin
+        sPalabra := LeerPalabra(i, iFin);
+        if sPalabra = 'CASE' then
+          oCases.Push(not bInicio)
+        else if (sPalabra = 'END') and (oCases.Count > 0) then
+        begin
+          if oCases.Peek then
+            oCases.Pop
+          else
+          begin
+            iSiguiente := iFin;
+            while (iSiguiente <= Length(ACodigo))
+              and CharInSet(ACodigo[iSiguiente], [' ', #9, #13, #10]) do
+              Inc(iSiguiente);
+            if LeerPalabra(iSiguiente, iSiguiente) = 'CASE' then
+            begin
+              oCases.Pop;
+              iFin := iSiguiente;
+            end;
+          end;
+        end;
+        if MatchText(sPalabra, ['THEN', 'ELSE', 'DO', 'LOOP', 'REPEAT',
+          'BEGIN'])
+          and (iNivel = 0)
+          and ((oCases.Count = 0) or not oCases.Peek) then
+          Anadir(i, iFin - i)
+        else
+          bInicio := False;
+        i := iFin;
+      end
+      else
+      begin
+        case ACodigo[i] of
+          '(': Inc(iNivel);
+          ')': Dec(iNivel);
+          ';': Anadir(i, 1);
+        end;
+        Inc(i);
+      end;
+    end;
+    Result := oLista.ToArray;
+  finally
+    FreeAndNil(oCases);
+    FreeAndNil(oLista);
+  end;
+end;
+
+// MySQL no deja usar una tabla temporal más de una vez en la misma
+// sentencia (ER_CANT_REOPEN_TABLE); MariaDB sí. Justo antes de la sentencia
+// se copia la tabla a <tabla>_rN (una copia por cada uso de más) y esos usos
+// pasan a la copia; el uso que escribe (INTO, UPDATE) se queda con la
+// original. Se recorre de atrás adelante para no mover las posiciones.
+function TConversorMySQL841.CopiarTemporalesReabiertas(const AObjeto,
+  ACodigo: string): string;
+var
+  aSeparadores: TArray<TSeparadorCuerpo>;
+  i, iInicio, iFin: Integer;
+  sSeparador: string;
+begin
+  Result := ACodigo;
+  if FTemporales.Count > 0 then
+  begin
+    aSeparadores := SeparadoresCuerpo(ACodigo);
+    for i := Length(aSeparadores) downto 0 do
+    begin
+      if i = 0 then
+      begin
+        iInicio := 1;
+        sSeparador := '';
+      end
+      else
+      begin
+        iInicio := aSeparadores[i - 1].Indice + aSeparadores[i - 1].Longitud;
+        sSeparador := aSeparadores[i - 1].Texto;
+      end;
+      if i = Length(aSeparadores) then
+        iFin := Length(ACodigo) + 1
+      else
+        iFin := aSeparadores[i].Indice;
+      CopiarEnFragmento(Result, iInicio, iFin, sSeparador, AObjeto);
+    end;
+  end;
+end;
+
+procedure TConversorMySQL841.CopiarEnFragmento(var ATexto: string;
+  AInicio, AFin: Integer; const ASeparador, AObjeto: string);
+var
+  oUsos: TMatchCollection;
+  oUso: TMatch;
+  oVeces, oConservado, oCopias: TDictionary<string, Integer>;
+  oRepetidas: TStringList;
+  sFragmento, sClave, sPalabra, sSangria, sSalto, sInsercion, sCopia,
+    sAviso: string;
+  iPalabra, iLinea, iCopia, i: Integer;
+  bConvertible: Boolean;
+begin
+  sFragmento := Copy(ATexto, AInicio, AFin - AInicio);
+  oUsos := TRegEx.Matches(sFragmento, PATRON_USO_TABLA, [roIgnoreCase]);
+  oVeces := TDictionary<string, Integer>.Create;
+  oConservado := TDictionary<string, Integer>.Create;
+  oCopias := TDictionary<string, Integer>.Create;
+  oRepetidas := TStringList.Create;
+  try
+    for oUso in oUsos do
+    begin
+      sClave := LowerCase(oUso.Groups[2].Value);
+      if FTemporales.ContainsKey(sClave) then
+      begin
+        if not oVeces.TryGetValue(sClave, i) then
+          i := 0;
+        oVeces.AddOrSetValue(sClave, i + 1);
+        if i = 1 then
+          oRepetidas.Add(sClave);
+        // Se conserva el primer uso, salvo que otro posterior escriba.
+        if not oConservado.ContainsKey(sClave) then
+          oConservado.Add(sClave, oUso.Groups[2].Index)
+        else if MatchText(oUso.Groups[1].Value, ['INTO', 'UPDATE']) then
+          oConservado[sClave] := oUso.Groups[2].Index;
+      end;
+    end;
+    if oRepetidas.Count > 0 then
+    begin
+      // Donde insertar: la primera palabra, que tiene que empezar una
+      // sentencia de verdad (tras ; o, tras THEN/ELSE..., en línea nueva).
+      // Se saltan blancos y comentarios (marcas #1n#2 del enmascarado).
+      iPalabra := 1;
+      while (iPalabra <= Length(sFragmento))
+        and CharInSet(sFragmento[iPalabra], [' ', #9, #13, #10, #1]) do
+      begin
+        if sFragmento[iPalabra] = #1 then
+          while (iPalabra <= Length(sFragmento))
+            and (sFragmento[iPalabra] <> #2) do
+            Inc(iPalabra);
+        Inc(iPalabra);
+      end;
+      i := iPalabra;
+      while (i <= Length(sFragmento))
+        and CharInSet(sFragmento[i], ['A'..'Z', 'a'..'z']) do
+        Inc(i);
+      sPalabra := UpperCase(Copy(sFragmento, iPalabra, i - iPalabra));
+      bConvertible := (ASeparador <> '')
+        and ((ASeparador = ';') or (Pos(#10, Copy(sFragmento, 1,
+          iPalabra - 1)) > 0))
+        and MatchText(sPalabra, ['INSERT', 'UPDATE', 'DELETE', 'SELECT',
+          'SET', 'IF', 'REPLACE', 'CREATE', 'CALL']);
+      for sClave in oRepetidas do
+      begin
+        // Un calificador tabla.columna seguiría apuntando a la original.
+        if TRegEx.IsMatch(sFragmento, '(?<![A-Za-z0-9_.])`?' + sClave +
+          '`?\s*\.', [roIgnoreCase])
+          or (Length(sClave) + 3 > 64) then
+          bConvertible := False;
+      end;
+      if not bConvertible then
+      begin
+        for sClave in oRepetidas do
+        begin
+          sAviso := Format('%s: la tabla temporal %s se usa dos veces en ' +
+            'una misma sentencia y no se puede copiar antes; MySQL no ' +
+            'puede reabrirla ("Can''t reopen table")',
+            [AObjeto, FTemporales[sClave]]);
+          if FInforme.Avisos.IndexOf(sAviso) < 0 then
+            FInforme.Avisos.Add(sAviso);
+        end;
+      end
+      else
+      begin
+        iLinea := iPalabra;
+        while (iLinea > 1) and CharInSet(sFragmento[iLinea - 1], [' ', #9]) do
+          Dec(iLinea);
+        sSangria := Copy(sFragmento, iLinea, iPalabra - iLinea);
+        sSalto := SaltoDeLineaDe(ATexto);
+        sInsercion := '';
+        // De atrás adelante: los usos repetidos pasan a su copia.
+        for i := oUsos.Count - 1 downto 0 do
+        begin
+          sClave := LowerCase(oUsos[i].Groups[2].Value);
+          if (oRepetidas.IndexOf(sClave) >= 0)
+            and (oConservado[sClave] <> oUsos[i].Groups[2].Index) then
+          begin
+            if not oCopias.TryGetValue(sClave, iCopia) then
+              iCopia := 0;
+            Inc(iCopia);
+            oCopias.AddOrSetValue(sClave, iCopia);
+            sCopia := FTemporales[sClave] + '_r' + IntToStr(iCopia);
+            sFragmento := Copy(sFragmento, 1, oUsos[i].Groups[2].Index - 1)
+              + sCopia + Copy(sFragmento, oUsos[i].Groups[2].Index
+              + oUsos[i].Groups[2].Length, MaxInt);
+            sInsercion := sInsercion
+              + 'DROP TEMPORARY TABLE IF EXISTS ' + sCopia + ';' + sSalto
+              + sSangria + 'CREATE TEMPORARY TABLE ' + sCopia + ' LIKE '
+              + FTemporales[sClave] + ';' + sSalto
+              + sSangria + 'INSERT INTO ' + sCopia + ' SELECT * FROM '
+              + FTemporales[sClave] + ';' + sSalto + sSangria;
+          end;
+        end;
+        sFragmento := Copy(sFragmento, 1, iPalabra - 1) + sInsercion
+          + Copy(sFragmento, iPalabra, MaxInt);
+        ATexto := Copy(ATexto, 1, AInicio - 1) + sFragmento
+          + Copy(ATexto, AFin, MaxInt);
+        Inc(FInforme.SentenciasTemporalCopiada);
+      end;
+    end;
+  finally
+    FreeAndNil(oRepetidas);
+    FreeAndNil(oCopias);
+    FreeAndNil(oConservado);
+    FreeAndNil(oVeces);
   end;
 end;
 

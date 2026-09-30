@@ -9,11 +9,8 @@ function NormalizeMariaDB10SQLText(const SQL: string): string;
 // (intercalaciones uca1400, CURRENT_TIMESTAMP(), utf8mb3, OR REPLACE TABLE).
 function NormalizarSqlParaDestino(const SQL: string;
   const Criterios: TCriteriosDialecto): string;
-// Ejecuta AComando solo si ACuentaExistentes devuelve 0 (o, con
-// ASiExiste, solo si devuelve algo). Es la guarda de los destinos sin
-// IF [NOT] EXISTS: consulta INFORMATION_SCHEMA y ejecuta con PREPARE.
-function GuardarComandoSegunCatalogo(const ACuentaExistentes,
-  AComando: string; ASiExiste: Boolean): string;
+// La guarda de los destinos sin IF [NOT] EXISTS (GuardarComandoSegunCatalogo)
+// vive en Core.Dialecto: la comparten la conversión de volcados.
 
 type
   TMySQLHelpers = class(TDBHelpers, ICheckConstraintHelpers)
@@ -174,31 +171,6 @@ begin
   end;
 end;
 
-function QuoteDynamicSQL(const SQL: string): string;
-begin
-  Result := QuotedStr(StringReplace(SQL, '\', '\\', [rfReplaceAll]));
-end;
-
-function GuardarComandoSegunCatalogo(const ACuentaExistentes,
-  AComando: string; ASiExiste: Boolean): string;
-var
-  Condicion: string;
-begin
-  if ASiExiste then
-    Condicion := '@fza_existe > 0'
-  else
-    Condicion := '@fza_existe = 0';
-  // DO 0 no devuelve filas: quien ejecuta el script no recibe un
-  // resultado vacío por cada guarda que no hace nada.
-  Result :=
-    'SET @fza_existe := (' + ACuentaExistentes + ');' + sLineBreak +
-    'SET @fza_sql := IF(' + Condicion + ', ' + QuoteDynamicSQL(AComando) +
-    ', ''DO 0'');' + sLineBreak +
-    'PREPARE fza_stmt FROM @fza_sql;' + sLineBreak +
-    'EXECUTE fza_stmt;' + sLineBreak +
-    'DEALLOCATE PREPARE fza_stmt;';
-end;
-
 constructor TMySQLHelpers.Create(const Criterios: TCriteriosDialecto);
 begin
   inherited Create;
@@ -213,17 +185,13 @@ end;
 function TMySQLHelpers.CuentaColumna(const TableName,
   ColumnName: string): string;
 begin
-  Result := 'SELECT COUNT(*) FROM information_schema.COLUMNS ' +
-    'WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ' +
-    QuotedStr(TableName) + ' AND COLUMN_NAME = ' + QuotedStr(ColumnName);
+  Result := CuentaColumnaCatalogo(TableName, ColumnName);
 end;
 
 function TMySQLHelpers.CuentaIndice(const TableName,
   IndexName: string): string;
 begin
-  Result := 'SELECT COUNT(*) FROM information_schema.STATISTICS ' +
-    'WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ' +
-    QuotedStr(TableName) + ' AND INDEX_NAME = ' + QuotedStr(IndexName);
+  Result := CuentaIndiceCatalogo(TableName, IndexName);
 end;
 
 function TMySQLHelpers.PosicionColumna(const ColumnInfo: TColumnInfo): string;
