@@ -134,6 +134,26 @@ begin
   end;
 end;
 
+// uca1400 (MariaDB 11+) a las intercalaciones españolas de MariaDB 10 y
+// MySQL 8: genérica y spanish → spanish_ci, spanish2 → spanish2_ci.
+function RebajarUca1400Texto(const SQL: string): string;
+const
+  RebajasUca1400: array[0..5, 0..1] of string = (
+    ('utf8mb4_uca1400_spanish2_ai_ci', 'utf8mb4_spanish2_ci'),
+    ('utf8mb4_uca1400_spanish_ai_ci', 'utf8mb4_spanish_ci'),
+    ('utf8mb4_uca1400_ai_ci', 'utf8mb4_spanish_ci'),
+    ('utf8mb3_uca1400_spanish2_ai_ci', 'utf8_spanish2_ci'),
+    ('utf8mb3_uca1400_spanish_ai_ci', 'utf8_spanish_ci'),
+    ('utf8mb3_uca1400_ai_ci', 'utf8_spanish_ci'));
+var
+  i: Integer;
+begin
+  Result := SQL;
+  for i := Low(RebajasUca1400) to High(RebajasUca1400) do
+    Result := StringReplace(Result, RebajasUca1400[i, 0], RebajasUca1400[i, 1],
+      [rfReplaceAll, rfIgnoreCase]);
+end;
+
 function NormalizeMariaDB10SQLText(const SQL: string): string;
 begin
   Result := SQL;
@@ -141,10 +161,7 @@ begin
     [rfReplaceAll, rfIgnoreCase]);
   Result := StringReplace(Result, 'CREATE OR REPLACE TABLE', 'CREATE TABLE',
     [rfReplaceAll, rfIgnoreCase]);
-  Result := StringReplace(Result, 'utf8mb4_uca1400_ai_ci',
-    'utf8mb4_spanish_ci', [rfReplaceAll, rfIgnoreCase]);
-  Result := StringReplace(Result, 'utf8mb3_uca1400_ai_ci',
-    'utf8_spanish_ci', [rfReplaceAll, rfIgnoreCase]);
+  Result := RebajarUca1400Texto(Result);
   Result := StringReplace(Result, 'utf8mb3', 'utf8',
     [rfReplaceAll, rfIgnoreCase]);
   Result := AddUtf8mb4CastCollations(Result);
@@ -161,10 +178,7 @@ begin
   begin
     Result := StringReplace(Result, 'CURRENT_TIMESTAMP()', 'CURRENT_TIMESTAMP',
       [rfReplaceAll, rfIgnoreCase]);
-    Result := StringReplace(Result, 'utf8mb4_uca1400_ai_ci',
-      'utf8mb4_spanish_ci', [rfReplaceAll, rfIgnoreCase]);
-    Result := StringReplace(Result, 'utf8mb3_uca1400_ai_ci',
-      'utf8_spanish_ci', [rfReplaceAll, rfIgnoreCase]);
+    Result := RebajarUca1400Texto(Result);
     Result := StringReplace(Result, 'utf8mb3', 'utf8',
       [rfReplaceAll, rfIgnoreCase]);
     Result := AddUtf8mb4CastCollations(Result);

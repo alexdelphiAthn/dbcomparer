@@ -903,17 +903,19 @@ end;
 // La intercalación de sesión que escribe mysqldump 11+ antes de vistas y
 // rutinas (SET collation_connection = utf8mb4_uca1400_ai_ci) y la de
 // columnas o COLLATE: MySQL 8 no tiene uca1400. Se rebaja como para
-// MariaDB 10; otras variantes de uca1400 se avisan.
+// MariaDB 10: *_uca1400_ai_ci y *_uca1400_spanish_ai_ci a *_spanish_ci y
+// *_uca1400_spanish2_ai_ci a *_spanish2_ci; otras variantes se avisan.
 function TConversorMySQL841.RebajarUca1400(
   const AObjeto, ACodigo: string): string;
 begin
   FCuantosIntercalacion := 0;
-  Result := TRegEx.Replace(ACodigo, '\b(utf8mb4|utf8mb3|utf8)_uca1400_ai_ci\b',
+  Result := TRegEx.Replace(ACodigo,
+    '\b(utf8mb4|utf8mb3|utf8)_uca1400_(?:(spanish2?)_)?ai_ci\b',
     EvaluarUca1400, [roIgnoreCase]);
   Inc(FInforme.IntercalacionesRebajadas, FCuantosIntercalacion);
   if ContainsText(Result, '_uca1400_') then
     FInforme.Avisos.Add(AObjeto + ': intercalación uca1400 sin equivalente ' +
-      'en MySQL 8 (solo se rebaja *_uca1400_ai_ci)');
+      'en MySQL 8 (solo se rebajan *_uca1400_[spanish[2]_]ai_ci)');
 end;
 
 // seq_A_to_B como tabla derivada: A más un número de tantas cifras como
@@ -963,9 +965,14 @@ function TConversorMySQL841.EvaluarUca1400(const AMatch: TMatch): string;
 begin
   Inc(FCuantosIntercalacion);
   if SameText(AMatch.Groups[1].Value, 'utf8mb4') then
-    Result := 'utf8mb4_spanish_ci'
+    Result := 'utf8mb4_'
   else
-    Result := 'utf8mb3_spanish_ci';
+    Result := 'utf8mb3_';
+  if (AMatch.Groups.Count > 2) and SameText(AMatch.Groups[2].Value, 'spanish2')
+  then
+    Result := Result + 'spanish2_ci'
+  else
+    Result := Result + 'spanish_ci';
 end;
 
 function TieneComaNivelCero(const ATexto: string): Boolean;
